@@ -6,13 +6,18 @@ import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.file.Directory
+import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.plugins.BasePlugin
 import org.gradle.api.plugins.JavaPlugin
+import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Delete
+import org.gradle.api.tasks.JavaExec
 import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.bundling.Zip
 import org.gradle.api.tasks.bundling.ZipEntryCompression
 import org.gradle.jvm.tasks.Jar
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+import org.gradle.jvm.toolchain.JavaToolchainService
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -39,7 +44,13 @@ class SdgModPlugin : Plugin<Project> {
             project.rootProject.layout.projectDirectory.dir("../SourceSector/build/named-game-repo/windows")
         )
 
+        // SourceSector mapping 工具构件发布在 mavenLocal（与 NanoForge API 的消费方式一致）；
+        // mavenCentral 用于解析工具的传递依赖（ASM 等）
+        project.repositories.mavenLocal()
+        project.repositories.mavenCentral()
+
         wireModProduction(project, ext)
+        wireObfArtifacts(project, ext)
         wireDeployment(project, ext)
         project.afterEvaluate { wireGameDependencies(project, ext) }
     }
@@ -66,13 +77,28 @@ class SdgModPlugin : Plugin<Project> {
             }
         }
 
+        val mainJar = project.tasks.named("jar", Jar::class.java)
+        // 附加产物（sources/agent 等 classifier jar）原样汇集；主 jar 按产物形态二选一，shadeObfJar 永不直接进入布局
+        val extraJarTasks = project.tasks.withType(Jar::class.java)
+            .matching { t -> t.name != "jar" && t.name != "shadeObfJar" }
         val copyJars = project.tasks.register("copyJars", Sync::class.java) {
             it.group = TASK_GROUP
-            it.description = "汇集构建产物 jar 到产物布局 jars/"
-            val jarTasks = project.tasks.withType(Jar::class.java)
-            it.from(project.provider { jarTasks.map { t -> t.archiveFile.get().asFile } })
+            it.description = "汇集构建产物 jar 到产物布局 jars/（主 jar 按 artifactMode 取 named 或 obf 产物）"
+            it.from(project.provider {
+                val extras = extraJarTasks.map { t -> t.archiveFile.get().asFile }
+                val main = when (ext.artifactMode.get()) {
+                    ArtifactMode.DEOBF -> mainJar.get().archiveFile.get().asFile
+                    ArtifactMode.OBF -> project.tasks.named("shadeObfJar", Jar::class.java).get()
+                        .archiveFile.get().asFile
+                }
+                extras + main
+            })
             it.into(modProductionDir.map { d -> d.dir("jars") })
-            it.dependsOn(jarTasks)
+            it.dependsOn(extraJarTasks)
+            it.dependsOn(mainJar)
+            it.dependsOn(project.provider {
+                if (ext.artifactMode.get() == ArtifactMode.OBF) listOf("verifyObfJar") else emptyList<String>()
+            })
         }
 
         val generateModInfo = project.tasks.register("generateModInfoJson", GenerateModInfoJson::class.java) {
@@ -111,6 +137,87 @@ class SdgModPlugin : Plugin<Project> {
         }
         project.tasks.named(BasePlugin.ASSEMBLE_TASK_NAME) {
             it.finalizedBy("zipModProduction")
+        }
+    }
+
+    /** R3：OBF 形态产物链——reobfJar（named→obf）→ shadeObfJar（合并第三方库）→ verifyObfJar（质量门）。 */
+    private fun wireObfArtifacts(project: Project, ext: SdgExtension) {
+        val mappingTool = project.configurations.create("sdgMappingTool") {
+            it.isCanBeConsumed = false
+            it.isCanBeResolved = true
+            it.isVisible = false
+        }
+        val mappings = project.configurations.create("sdgMappings") {
+            it.isCanBeConsumed = false
+            it.isCanBeResolved = true
+            it.isVisible = false
+        }
+        project.dependencies.add(mappingTool.name, "io.github.nanoforged:sourcesector-mapping:0.1.0-SNAPSHOT")
+
+        // mapping 表来源：DSL 直指定优先，否则从 sourceRepo 解析 mappings 构件（dep 在 afterEvaluate 补充）
+        val mappingFile: Provider<File> = project.provider {
+            ext.mappingFile.orNull?.asFile ?: mappings.singleFile
+        }
+
+        val mainJar = project.tasks.named("jar", Jar::class.java)
+        val reobfOutput = project.layout.buildDirectory.file(
+            mainJar.flatMap { t -> t.archiveFileName }.map { name -> "reobf/$name" }
+        )
+
+        val toolchains = project.extensions.getByType(JavaToolchainService::class.java)
+        val reobfJar = project.tasks.register("reobfJar", JavaExec::class.java) {
+            it.group = TASK_GROUP
+            it.description = "将主 jar 从 named 重映射为 obf 字节码（SourceSector mapping 工具）"
+            it.onlyIf { ext.artifactMode.get() == ArtifactMode.OBF }
+            it.classpath = mappingTool
+            it.mainClass.set("io.github.nanoforged.sourcesector.mapping.JarRemapCli")
+            // mapping 工具以 release 25 编译
+            it.javaLauncher.set(
+                toolchains.launcherFor { spec -> spec.languageVersion.set(JavaLanguageVersion.of(25)) }
+            )
+            it.inputs.file(mainJar.flatMap { t -> t.archiveFile })
+            it.inputs.file(mappingFile)
+            it.outputs.file(reobfOutput)
+            it.dependsOn(mainJar)
+            it.doFirst { exec ->
+                val input = mainJar.get().archiveFile.get().asFile
+                val output = reobfOutput.get().asFile
+                output.parentFile.mkdirs()
+                (exec as JavaExec).setArgs(
+                    listOf(
+                        "--mapping=${mappingFile.get().absolutePath}",
+                        "single", "named-to-obf",
+                        input.absolutePath, output.absolutePath,
+                    )
+                )
+            }
+        }
+
+        val shadeObfJar = project.tasks.register("shadeObfJar", Jar::class.java) {
+            it.group = TASK_GROUP
+            it.description = "obf 形态主产物：reobf 结果合并 runtimeClasspath 第三方库"
+            it.archiveFileName.set(mainJar.flatMap { t -> t.archiveFileName })
+            it.destinationDirectory.set(project.layout.buildDirectory.dir("obf"))
+            it.from(project.provider { project.zipTree(reobfOutput.get().asFile) })
+            it.from(project.provider {
+                project.configurations.getByName(JavaPlugin.RUNTIME_CLASSPATH_CONFIGURATION_NAME).files
+                    .filter { f -> f.extension == "jar" }
+                    .map { f -> project.zipTree(f) }
+            })
+            // SSOptimizer 已验证：RFB 会把 module-info.class 误判为命名模块，必须排除
+            it.exclude("module-info.class", "META-INF/versions/**")
+            it.duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+            it.dependsOn(reobfJar)
+        }
+
+        project.tasks.register("verifyObfJar", VerifyObfJar::class.java) {
+            it.group = TASK_GROUP
+            it.description = "obf 产物质量门：不残留 named 符号引用"
+            it.obfJar.set(shadeObfJar.flatMap { t -> t.archiveFile })
+            it.mapping.fileProvider(mappingFile)
+            it.sampleSize.convention(500)
+            it.dependsOn(shadeObfJar)
+            it.outputs.upToDateWhen { false }
         }
     }
 
@@ -170,6 +277,18 @@ class SdgModPlugin : Plugin<Project> {
         }
 
         wireModDependencyBridge(project, ext, modId)
+        wireMappingsDependency(project, ext)
+    }
+
+    /** OBF 形态且未直指定表时，从 sourceRepo 解析 mappings 表构件（`@tiny`）。 */
+    private fun wireMappingsDependency(project: Project, ext: SdgExtension) {
+        if (ext.artifactMode.get() != ArtifactMode.OBF || ext.mappingFile.isPresent) return
+        val gameVersion = ext.gameVersion.orNull
+            ?: throw GradleException("OBF 形态需要 sdg.gameVersion 以解析 mappings 表构件（或用 sdg.mappingFile 直指定）。")
+        project.dependencies.add(
+            "sdgMappings",
+            "$NAMED_GAME_GROUP:mappings-${ext.mappingPlatform.get()}:$gameVersion-SNAPSHOT@tiny"
+        )
     }
 
     /** named 仓模式：SourceSector 本地 maven 仓 + 4 个 named 坐标（SNAPSHOT 每次重解析）。 */

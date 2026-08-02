@@ -4,6 +4,7 @@ import org.gradle.api.model.ObjectFactory
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFileProperty
 import javax.inject.Inject
 
 /**
@@ -62,6 +63,17 @@ abstract class SdgExtension @Inject constructor(objects: ObjectFactory) {
     /** 游戏依赖来源模式，默认 [GameDependencyMode.NAMED_REPO]。 */
     val gameDependencyMode: Property<GameDependencyMode> =
         objects.property(GameDependencyMode::class.java).convention(GameDependencyMode.NAMED_REPO)
+
+    /** 产物形态，默认 [ArtifactMode.DEOBF]；[ArtifactMode.OBF] 启用 reobf + shadow 产物链。 */
+    val artifactMode: Property<ArtifactMode> =
+        objects.property(ArtifactMode::class.java).convention(ArtifactMode.DEOBF)
+
+    /** 映射平台（决定 mappings 表构件 artifactId），默认 windows（全平台唯一基准）。 */
+    val mappingPlatform: Property<String> =
+        objects.property(String::class.java).convention("windows")
+
+    /** 全量 tiny 表文件直指定（过渡路径）；不设置时从 sourceRepo 解析 mappings 表构件。 */
+    val mappingFile: RegularFileProperty = objects.fileProperty()
 
     companion object {
         /** SourceSector 发布的 4 个 named 游戏 jar 坐标。 */
