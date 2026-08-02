@@ -64,6 +64,32 @@ class ModJarIndexImplTest {
     }
 
     @Test
+    fun `宽松解析：单引号 version 对象（MagicLib 生态事实形态）`() {
+        writeMod(
+            "MagicLib",
+            """
+            {
+                "id": "MagicLib",
+                # Using the long version format lets the game correctly compare versions.
+                "version": { "major": '1', "minor": '5', "patch": '6' },
+                "jars": [ "jars/MagicLib.jar", "jars/MagicLib-Kotlin.jar" ],
+            }
+            """.trimIndent(),
+            jars = listOf("jars/MagicLib.jar", "jars/MagicLib-Kotlin.jar"),
+        )
+
+        val result = index.scan(modsDir, excludeModId = null) {}
+
+        assertEquals(
+            listOf(
+                File(modsDir, "MagicLib/jars/MagicLib.jar"),
+                File(modsDir, "MagicLib/jars/MagicLib-Kotlin.jar"),
+            ),
+            result["MagicLib"],
+        )
+    }
+
+    @Test
     fun `excludeModId 跳过自身`() {
         writeMod("Self", """{"id": "my_mod", "jars": ["jars/Self.jar"]}""", jars = listOf("jars/Self.jar"))
         writeMod("Other", """{"id": "other", "jars": ["jars/Other.jar"]}""", jars = listOf("jars/Other.jar"))

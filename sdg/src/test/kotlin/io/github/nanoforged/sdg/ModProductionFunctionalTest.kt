@@ -96,6 +96,36 @@ class ModProductionFunctionalTest {
     }
 
     @Test
+    fun `mod_info_json 的 jars 字段主 jar 排首位`() {
+        prepareProject()
+        // 附加 classifier jar：字典序下 "-agent" 会排在主 jar 名前（'-' < '.'），
+        // 本用例验证排序按“无 classifier 主 jar 优先”而非纯字典序。
+        projectDir.resolve("build.gradle.kts").apply {
+            writeText(
+                readText() + """
+                |
+                |val agentJar = tasks.register<Jar>("agentJar") { archiveClassifier.set("agent") }
+                |val sourcesJar = tasks.register<Jar>("sourcesJar") { archiveClassifier.set("sources") }
+                """.trimMargin()
+            )
+        }
+
+        runBuild("modProduction")
+
+        @Suppress("UNCHECKED_CAST")
+        val modInfo = JsonSlurper().parse(projectDir.resolve("build/mod_production/mod_info.json"))
+            as Map<String, Any?>
+        assertEquals(
+            listOf(
+                "jars/testmod-1.0.jar",
+                "jars/testmod-1.0-agent.jar",
+                "jars/testmod-1.0-sources.jar",
+            ),
+            modInfo["jars"],
+        )
+    }
+
+    @Test
     fun `zipModProduction 产出发布 zip 且由 assemble 触发`() {
         prepareProject()
 

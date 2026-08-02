@@ -1,5 +1,6 @@
 package io.github.nanoforged.sdg
 
+import groovy.json.JsonParserType
 import groovy.json.JsonSlurper
 import java.io.File
 
@@ -41,11 +42,16 @@ class ModJarIndexImpl : ModJarIndex {
         return result
     }
 
-    /** 去除 `#` 行注释与尾逗号后按 JSON 解析。 */
+    /**
+     * 去除 `#` 行注释与尾逗号后按 JSON 解析。
+     *
+     * 生态里部分模组的 version 对象使用单引号字符串（如 `"major": '1'`），
+     * JsonSlurper 默认解析器不接受单引号，必须使用 [JsonParserType.LAX]。
+     */
     private fun parseLenient(content: String): Map<*, *> {
         val cleaned = content
             .replace(Regex("(?m)#.*$"), "")
             .replace(Regex(",(\\s*[}\\]])"), "$1")
-        return JsonSlurper().parseText(cleaned) as Map<*, *>
+        return JsonSlurper().setType(JsonParserType.LAX).parseText(cleaned) as Map<*, *>
     }
 }
