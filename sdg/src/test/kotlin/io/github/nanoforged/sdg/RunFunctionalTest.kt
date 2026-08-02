@@ -79,6 +79,44 @@ class RunFunctionalTest {
     }
 
     @Test
+    fun `VANILLA 模式：显式 javaExec 生效且不被项目 toolchain 冲突拦截`() {
+        // 假 java：-version 探测输出版本行，其余调用回显标记即退出。
+        // Asteria 迁移实测：项目配置 java toolchain 时 JavaExec 的 javaLauncher convention
+        // 与 executable 并存触发 Gradle toolchain 一致性校验，本用例防回归。
+        val fakeJava = projectDir.resolve("fake-jre/bin/java")
+        fakeJava.parentFile.mkdirs()
+        fakeJava.writeText(
+            """
+            #!/bin/sh
+            if [ "${'$'}1" = "-version" ]; then
+                echo 'openjdk version "17.0.12" 2024-07-16'
+                exit 0
+            fi
+            echo "FAKE-JAVA-EXECUTED"
+            """.trimIndent()
+        )
+        fakeJava.setExecutable(true)
+        projectDir.resolve("launch-config.json").writeText(
+            """{"jvmArgs": {"common": ["-Xmx1g"], "linux": []}, "classpath": ["starfarer-res.jar"]}"""
+        )
+        writeProject("launchMode.set(io.github.nanoforged.sdg.LaunchMode.VANILLA)")
+        projectDir.resolve("build.gradle.kts").apply {
+            writeText(
+                readText() + "\n" + """
+                java { toolchain { languageVersion.set(JavaLanguageVersion.of(17)) } }
+                """.trimIndent()
+            )
+        }
+
+        val result = runner("runGame", "-Pstarsector.javaExec=${fakeJava.absolutePath}").build()
+
+        assertTrue(
+            result.output.contains("FAKE-JAVA-EXECUTED"),
+            "runGame 应执行 starsector.javaExec 指定的 java：\n${result.output}",
+        )
+    }
+
+    @Test
     fun `decompileDependencies 真实反编译 compileOnly 依赖`() {
         // 编译一个带方法体的夹具类进游戏目录，作为 compileOnly 依赖来源
         val workDir = projectDir.resolve("fixture")
