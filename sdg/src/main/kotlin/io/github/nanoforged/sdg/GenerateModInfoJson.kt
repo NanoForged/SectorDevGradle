@@ -63,12 +63,8 @@ abstract class GenerateModInfoJson : DefaultTask() {
 
     @TaskAction
     fun generate() {
-        // 主 jar（无 classifier）文件名总是最短（classifier 追加在版本号之后），排首位保证游戏加载顺序主 jar 优先；
-        // 附加 classifier jar 按字典序稳定排列。
-        val jars = productionJars.files
-            .filter { it.extension == "jar" }
-            .sortedWith(compareBy({ it.name.length }, { it.name }))
-            .map { "jars/${it.name}" }
+        // 排序规则与 nanoforge.mod.toml 生成端共享（ModJarOrdering），保证两文件 jars 字段一致。
+        val jars = ModJarOrdering.mainFirst(productionJars.files)
 
         val info = linkedMapOf<String, Any>(
             "id" to modId.get(),
