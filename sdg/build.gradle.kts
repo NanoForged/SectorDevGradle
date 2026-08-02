@@ -11,6 +11,9 @@ java {
 }
 
 dependencies {
+    // runGame 的 NANOFORGE 启动前置检查链（纯 Java 库，随插件 POM 传递给消费方）
+    implementation("io.github.nanoforged:launch-spec:0.1.0-SNAPSHOT")
+
     testImplementation(gradleTestKit())
     testImplementation(platform("org.junit:junit-bom:5.13.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")

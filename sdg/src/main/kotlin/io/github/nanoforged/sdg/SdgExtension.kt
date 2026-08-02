@@ -75,6 +75,24 @@ abstract class SdgExtension @Inject constructor(objects: ObjectFactory) {
     /** 全量 tiny 表文件直指定（过渡路径）；不设置时从 sourceRepo 解析 mappings 表构件。 */
     val mappingFile: RegularFileProperty = objects.fileProperty()
 
+    /** runGame 启动模式，默认随 artifactMode：OBF→VANILLA，DEOBF→NANOFORGE。 */
+    val launchMode: Property<LaunchMode> = objects.property(LaunchMode::class.java)
+
+    /** VANILLA 模式的启动配置文件（jvmArgs/classpath 清单），默认 `<工程>/launch-config.json`。 */
+    val launchConfigFile: RegularFileProperty = objects.fileProperty()
+
+    /** JDWP / IDEA attach 端口（`-Psdg.debug=true` 启用），默认 5005。 */
+    val debugPort: Property<Int> = objects.property(Int::class.java).convention(5005)
+
+    /** NANOFORGE 模式堆大小（Xms=Xmx），默认 4g（launch-spec 脚本基线 16g 面向生产）。 */
+    val heap: Property<String> = objects.property(String::class.java).convention("4g")
+
+    /** 反编译器版本，默认 1.12.0（与 SourceSector 对齐）。 */
+    val decompilerVersion: Property<String> = objects.property(String::class.java).convention("1.12.0")
+
+    /** decompileDependencies 输出目录，默认 `<工程>/dev-resources/sources`。 */
+    val decompiledSourcesDir: DirectoryProperty = objects.directoryProperty()
+
     companion object {
         /** SourceSector 发布的 4 个 named 游戏 jar 坐标。 */
         const val NAMED_GAME_GROUP = "starsector.named"

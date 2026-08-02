@@ -1,5 +1,11 @@
 package io.github.nanoforged.sdg
 
+import io.github.nanoforged.launchspec.JvmArgsOptions
+import io.github.nanoforged.launchspec.impl.ClasspathAssemblerImpl
+import io.github.nanoforged.launchspec.impl.GameInstallProbeImpl
+import io.github.nanoforged.launchspec.impl.JvmArgsTemplateImpl
+import io.github.nanoforged.launchspec.impl.LaunchPrecheckImpl
+import io.github.nanoforged.launchspec.impl.SampleNamedJarProbe
 import io.github.nanoforged.sdg.SdgExtension.Companion.NAMED_GAME_ARTIFACTS
 import io.github.nanoforged.sdg.SdgExtension.Companion.NAMED_GAME_GROUP
 import org.gradle.api.GradleException
@@ -18,6 +24,7 @@ import org.gradle.api.tasks.bundling.ZipEntryCompression
 import org.gradle.jvm.tasks.Jar
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
+import org.gradle.plugins.ide.idea.model.IdeaModel
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -44,6 +51,12 @@ class SdgModPlugin : Plugin<Project> {
             project.rootProject.layout.projectDirectory.dir("../SourceSector/build/named-game-repo/windows")
         )
 
+        ext.launchMode.convention(
+            ext.artifactMode.map { if (it == ArtifactMode.OBF) LaunchMode.VANILLA else LaunchMode.NANOFORGE }
+        )
+        ext.launchConfigFile.convention(project.layout.projectDirectory.file("launch-config.json"))
+        ext.decompiledSourcesDir.convention(project.layout.projectDirectory.dir("dev-resources/sources"))
+
         // SourceSector mapping 工具构件发布在 mavenLocal（与 NanoForge API 的消费方式一致）；
         // mavenCentral 用于解析工具的传递依赖（ASM 等）
         project.repositories.mavenLocal()
@@ -52,6 +65,7 @@ class SdgModPlugin : Plugin<Project> {
         wireModProduction(project, ext)
         wireObfArtifacts(project, ext)
         wireDeployment(project, ext)
+        wireRun(project, ext)
         project.afterEvaluate { wireGameDependencies(project, ext) }
     }
 
@@ -221,6 +235,189 @@ class SdgModPlugin : Plugin<Project> {
         }
     }
 
+    /** R4：runGame（双启动模式）、genIdeaRuns（IDEA 配置生成）、decompileDependencies（源码阅读）。 */
+    private fun wireRun(project: Project, ext: SdgExtension) {
+        project.tasks.register("runGame", JavaExec::class.java) {
+            it.group = TASK_GROUP
+            it.description = "启动游戏（launchMode 决定 NanoForge 前置检查链 / 原版直启；-Psdg.debug=true 注入 JDWP）"
+            it.dependsOn("deployMod")
+            it.doFirst { exec -> configureLaunch(project, ext, exec as JavaExec) }
+        }
+
+        project.tasks.register("genIdeaRuns") {
+            it.group = TASK_GROUP
+            it.description = "生成 IDEA 运行 / Remote Attach 配置到 .run/"
+            it.outputs.dir(project.layout.projectDirectory.dir(".run"))
+            it.doLast {
+                val runDir = project.layout.projectDirectory.dir(".run").asFile
+                runDir.mkdirs()
+                runDir.resolve("SDG-runGame.run.xml").writeText(gradleRunXml())
+                runDir.resolve("SDG-Attach.run.xml").writeText(remoteAttachXml(ext.debugPort.get()))
+            }
+            project.logger.info("SDG: 已生成 .run/ 配置")
+        }
+
+        val decompiler = project.configurations.create("sdgDecompiler") {
+            it.isCanBeResolved = true
+            it.isCanBeConsumed = false
+            it.isVisible = false
+        }
+        val resolvableCompileOnly = project.configurations.create("sdgResolvableCompileOnly") {
+            it.isCanBeResolved = true
+            it.isCanBeConsumed = false
+            it.isVisible = false
+            it.extendsFrom(project.configurations.getByName(JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME))
+        }
+        project.tasks.register("decompileDependencies", DecompileDependencies::class.java) {
+            it.group = TASK_GROUP
+            it.description = "Vineflower 反编译 compileOnly 依赖到统一源码目录（IDE 索引用）"
+            it.decompiler.from(decompiler)
+            it.inputJars.from(resolvableCompileOnly)
+            it.outputDir.set(ext.decompiledSourcesDir)
+        }
+        project.plugins.withId("idea") {
+            project.extensions.getByType(IdeaModel::class.java).module.sourceDirs
+                .add(ext.decompiledSourcesDir.get().asFile)
+        }
+    }
+
+    /** runGame 执行时装配：双模式分支 + JVM 探测 + debug 注入。 */
+    private fun configureLaunch(project: Project, ext: SdgExtension, task: JavaExec) {
+        val gameDir = ext.gameDir.orNull?.asFile
+            ?: throw GradleException("sdg.gameDir 未设置，无法启动游戏。")
+        if (!gameDir.isDirectory) {
+            throw GradleException("sdg.gameDir 不存在：${gameDir.absolutePath}")
+        }
+        task.workingDir = gameDir
+
+        val configuredJava = listOfNotNull(
+            project.findProperty("starsector.javaExec")?.toString(),
+            System.getenv("STARSECTOR_JAVA_EXEC"),
+        ).map { File(it) }
+        val configuredJavaHomes = listOfNotNull(
+            project.findProperty("starsector.javaHome")?.toString(),
+            System.getenv("STARSECTOR_JAVA_HOME"),
+            System.getenv("JBR17_HOME"),
+        ).map { File(it) }
+        val runtime = JavaRuntimeResolverImpl().resolve(gameDir, configuredJava, configuredJavaHomes)
+        task.executable(runtime.executable.absolutePath)
+        project.logger.lifecycle("SDG: runGame 使用 Java：${runtime.executable}（${runtime.versionLine}）")
+
+        val debugArgs = debugArgs(project, ext)
+        when (ext.launchMode.get()) {
+            LaunchMode.NANOFORGE -> configureNanoForgeLaunch(project, ext, task, gameDir, debugArgs)
+            LaunchMode.VANILLA -> configureVanillaLaunch(project, ext, task, gameDir, runtime, debugArgs)
+        }
+    }
+
+    /** NANOFORGE 模式：launch-spec 前置检查门 → RFB Main + --tweakClass。 */
+    private fun configureNanoForgeLaunch(
+        project: Project,
+        ext: SdgExtension,
+        task: JavaExec,
+        gameDir: File,
+        debugArgs: List<String>,
+    ) {
+        val osKey = JavaRuntimeResolverImpl.osKey()
+        val libraryPath = when (osKey) {
+            "windows" -> "./native/windows"
+            "mac" -> "./native/macosx"
+            else -> "./native/linux"
+        }
+        val options = JvmArgsOptions.builder()
+            .heapMin(ext.heap.get())
+            .heapMax(ext.heap.get())
+            .libraryPath(libraryPath)
+            .build()
+        val report = LaunchPrecheckImpl(
+            GameInstallProbeImpl(SampleNamedJarProbe()),
+            ClasspathAssemblerImpl(),
+            JvmArgsTemplateImpl(),
+        ).check(gameDir.toPath(), options)
+        if (!report.ready()) {
+            val checkFailures = (report.install().layoutChecks() + report.classpathChecks() + report.invariantChecks())
+                .filter { !it.passed() }
+                .map { "${it.name()}${it.reason()?.let { r -> "：$r" } ?: ""}" }
+            val namedFailures = report.install().namedVerdicts()
+                .filter { !it.named() }
+                .map { "named 判定未通过：${it.kind()}${it.reason()?.let { r -> "：$r" } ?: ""}" }
+            throw GradleException(
+                "启动前置检查失败（launch-spec）：\n  " + (checkFailures + namedFailures).joinToString("\n  ")
+            )
+        }
+
+        task.classpath = project.files(report.classpath().entries().map { it.file().toFile() })
+        task.jvmArgs = report.jvmArgs() + debugArgs
+        task.mainClass.set("com.gtnewhorizons.retrofuturabootstrap.Main")
+        task.args = listOf("--tweakClass", "io.github.nanoforged.NanoForgeBootstrap")
+        if (osKey == "linux") {
+            task.environment("mesa_glthread", "false")
+        }
+    }
+
+    /** VANILLA 模式：launch-config.json 驱动 + 不兼容参数过滤 + 原版主类直启。 */
+    private fun configureVanillaLaunch(
+        project: Project,
+        ext: SdgExtension,
+        task: JavaExec,
+        gameDir: File,
+        runtime: JavaRuntime,
+        debugArgs: List<String>,
+    ) {
+        val config = VanillaLaunchConfig.parse(
+            ext.launchConfigFile.get().asFile,
+            JavaRuntimeResolverImpl.osKey(),
+        )
+        val (kept, removed) = JavaRuntimeResolverImpl.filterIncompatibleArgs(config.commonArgs, runtime)
+        if (removed.isNotEmpty()) {
+            project.logger.lifecycle("SDG: 已移除与当前 JVM 不兼容的参数：${removed.joinToString(", ")}")
+        }
+        task.jvmArgs = kept + config.osArgs + debugArgs
+        task.classpath = project.files(config.classpath.map { File(gameDir, it) })
+        task.mainClass.set("com.fs.starfarer.StarfarerLauncher")
+    }
+
+    /** `-Psdg.debug=true` 注入 JDWP；`-Psdg.debugSuspend=false` 不挂起等待 attach。 */
+    private fun debugArgs(project: Project, ext: SdgExtension): List<String> {
+        if (project.providers.gradleProperty("sdg.debug").orNull != "true") return emptyList()
+        val suspend = if (project.providers.gradleProperty("sdg.debugSuspend").orNull == "false") "n" else "y"
+        return listOf("-agentlib:jdwp=transport=dt_socket,server=y,suspend=$suspend,address=*:${ext.debugPort.get()}")
+    }
+
+    private fun gradleRunXml(): String = """
+        <component name="ProjectRunConfigurationManager">
+          <configuration name="SDG runGame" type="GradleRunConfiguration" factoryName="Gradle">
+            <ExternalSystemSettings>
+              <option name="executionName" />
+              <option name="externalProjectPath" value="${'$'}PROJECT_DIR${'$'}" />
+              <option name="externalSystemIdString" value="GRADLE" />
+              <option name="scriptParameters" value="" />
+              <option name="taskDescriptions"><list /></option>
+              <option name="taskNames">
+                <list>
+                  <option value="runGame" />
+                </list>
+              </option>
+              <option name="vmOptions" value="" />
+            </ExternalSystemSettings>
+            <method v="2" />
+          </configuration>
+        </component>
+    """.trimIndent()
+
+    private fun remoteAttachXml(port: Int): String = """
+        <component name="ProjectRunConfigurationManager">
+          <configuration name="SDG Attach" type="Remote">
+            <option name="USE_SOCKET_TRANSPORT" value="true" />
+            <option name="SERVER_MODE" value="false" />
+            <option name="SHMEM_ADDRESS" value="javadebug" />
+            <option name="HOST" value="localhost" />
+            <option name="PORT" value="$port" />
+            <method v="2" />
+          </configuration>
+        </component>
+    """.trimIndent()
+
     /** R2：deployMod 覆盖式部署 + 可选 enabled_mods.json 维护。 */
     private fun wireDeployment(project: Project, ext: SdgExtension) {
         fun resolveDeployTarget(): File {
@@ -278,6 +475,7 @@ class SdgModPlugin : Plugin<Project> {
 
         wireModDependencyBridge(project, ext, modId)
         wireMappingsDependency(project, ext)
+        project.dependencies.add("sdgDecompiler", "org.vineflower:vineflower:${ext.decompilerVersion.get()}")
     }
 
     /** OBF 形态且未直指定表时，从 sourceRepo 解析 mappings 表构件（`@tiny`）。 */
