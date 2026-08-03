@@ -7,7 +7,7 @@ import java.io.File
  * 无 classifier 的主 jar 文件名最短，排首位保证游戏加载顺序主 jar 优先；
  * 附加 classifier jar 按字典序稳定排列。
  *
- * 两个插件（sdg.mod / sdg.nanoforge）生成元数据时必须走同一规则，保证字段一致。
+ * 两个插件（sectordevgradle.mod / sectordevgradle.nanoforge）生成元数据时必须走同一规则，保证字段一致。
  */
 object ModJarOrdering {
 

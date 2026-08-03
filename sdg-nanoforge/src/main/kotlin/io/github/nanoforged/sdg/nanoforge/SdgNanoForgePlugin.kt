@@ -9,14 +9,14 @@ import org.gradle.api.tasks.Sync
 import org.gradle.jvm.tasks.Jar
 
 /**
- * SDG NanoForge 支持插件（`io.github.nanoforged.sdg.nanoforge`）。
+ * SDG（SectorDevGradle 内部缩写）NanoForge 支持插件（`io.github.nanoforged.sectordevgradle.nanoforge`）。
  *
  * 职责（按实现计划分轮接入）：
  * - R5：nanoforge.mod.toml 生成（含 [libraries] 依赖库元数据）、coremod.toml 生成、
  *   `mods/coremods/` 落位部署
  * - R6：patch 工作流（消费 SourceSector patch-tool 构件）
  *
- * 依赖 sdg 核心插件（自动应用，幂等）；元数据事实源仍是 `sdg {}` DSL，本插件只追加
+ * 依赖 sdg 核心插件（自动应用，幂等）；元数据事实源仍是 `starsector {}` DSL，本插件只追加
  * NanoForge 专属段。
  */
 class SdgNanoForgePlugin : Plugin<Project> {
@@ -28,7 +28,7 @@ class SdgNanoForgePlugin : Plugin<Project> {
 
         // [libraries] 坐标解析 configuration：DSL 声明在首次解析时汇入（withDependencies 是
         // afterEvaluate 的配置缓存兼容替代），构建期解析算 sha256。
-        val librariesConfig = project.configurations.create("sdgNanoLibraries") {
+        val librariesConfig = project.configurations.create("starsectorNanoLibraries") {
             it.isCanBeResolved = true
             it.isCanBeConsumed = false
             it.isVisible = false
@@ -114,7 +114,7 @@ class SdgNanoForgePlugin : Plugin<Project> {
             it.from(mainJar.flatMap { t -> t.archiveFile })
             it.into(project.provider {
                 val gameDir = sdgExt.gameDir.orNull?.asFile
-                    ?: throw org.gradle.api.GradleException("sdg.gameDir 未设置，无法部署 coremod。")
+                    ?: throw org.gradle.api.GradleException("starsector.gameDir 未设置，无法部署 coremod。")
                 gameDir.resolve("mods/coremods")
             })
             it.dependsOn(mainJar)
@@ -126,6 +126,6 @@ class SdgNanoForgePlugin : Plugin<Project> {
     }
 
     private companion object {
-        const val TASK_GROUP = "sdg"
+        const val TASK_GROUP = "starsector"
     }
 }

@@ -29,11 +29,11 @@ class ModProductionFunctionalTest {
         projectDir.resolve("settings.gradle.kts").writeText("""rootProject.name = "testmod"""")
         projectDir.resolve("build.gradle.kts").writeText(
             """
-            plugins { id("io.github.nanoforged.sdg.mod") }
+            plugins { id("io.github.nanoforged.sectordevgradle.mod") }
 
             version = "1.0"
 
-            sdg {
+            starsector {
                 modId.set("testmod")
                 modName.set("Test Mod")
                 author.set("Tester")

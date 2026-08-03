@@ -27,9 +27,9 @@ class RunFunctionalTest {
         projectDir.resolve("settings.gradle.kts").writeText("""rootProject.name = "testmod"""")
         projectDir.resolve("build.gradle.kts").writeText(
             """
-            plugins { id("io.github.nanoforged.sdg.mod") }
+            plugins { id("io.github.nanoforged.sectordevgradle.mod") }
 
-            sdg {
+            starsector {
                 modId.set("testmod")
                 gameVersion.set("0.98a-RC8")
                 gameDependencyMode.set(io.github.nanoforged.sdg.GameDependencyMode.GAME_DIR)
@@ -48,8 +48,8 @@ class RunFunctionalTest {
 
         runner("genIdeaRuns").build()
 
-        val runXml = projectDir.resolve(".run/SDG-runGame.run.xml")
-        val attachXml = projectDir.resolve(".run/SDG-Attach.run.xml")
+        val runXml = projectDir.resolve(".run/Starsector-runGame.run.xml")
+        val attachXml = projectDir.resolve(".run/Starsector-Attach.run.xml")
         assertTrue(runXml.isFile && runXml.readText().contains("runGame"))
         assertTrue(attachXml.isFile && attachXml.readText().contains("\"PORT\" value=\"5005\""))
     }

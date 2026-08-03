@@ -8,7 +8,7 @@ import org.gradle.api.file.RegularFileProperty
 import javax.inject.Inject
 
 /**
- * SDG 核心 DSL（`sdg { ... }`）。
+ * SDG 核心 DSL（`starsector { ... }`）。
  *
  * 模组元数据（modId/modVersion 等）是 mod_info.json 与 nanoforge.mod.toml 的共同事实源，
  * 见 docs/design/nanoforge-mod-toml-v1.md。
@@ -81,7 +81,7 @@ abstract class SdgExtension @Inject constructor(objects: ObjectFactory) {
     /** VANILLA 模式的启动配置文件（jvmArgs/classpath 清单），默认 `<工程>/launch-config.json`。 */
     val launchConfigFile: RegularFileProperty = objects.fileProperty()
 
-    /** JDWP / IDEA attach 端口（`-Psdg.debug=true` 启用），默认 5005。 */
+    /** JDWP / IDEA attach 端口（`-Pstarsector.debug=true` 启用），默认 5005。 */
     val debugPort: Property<Int> = objects.property(Int::class.java).convention(5005)
 
     /** NANOFORGE 模式堆大小（Xms=Xmx），默认 4g（launch-spec 脚本基线 16g 面向生产）。 */

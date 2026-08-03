@@ -122,13 +122,13 @@ class ReobfFunctionalTest {
         projectDir.resolve("settings.gradle.kts").writeText("""rootProject.name = "testmod"""")
         projectDir.resolve("build.gradle.kts").writeText(
             """
-            plugins { id("io.github.nanoforged.sdg.mod") }
+            plugins { id("io.github.nanoforged.sectordevgradle.mod") }
 
             version = "1.0"
 
             dependencies { implementation(files("libs/lib.jar")) }
 
-            sdg {
+            starsector {
                 modId.set("testmod")
                 gameVersion.set("0.98a-RC8")
                 artifactMode.set(io.github.nanoforged.sdg.ArtifactMode.OBF)

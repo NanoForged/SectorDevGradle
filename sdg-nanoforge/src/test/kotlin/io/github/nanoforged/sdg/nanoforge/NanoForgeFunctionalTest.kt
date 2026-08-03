@@ -32,7 +32,7 @@ class NanoForgeFunctionalTest {
         projectDir.resolve("settings.gradle.kts").writeText("""rootProject.name = "testmod"""")
         projectDir.resolve("build.gradle.kts").writeText(
             """
-            plugins { id("io.github.nanoforged.sdg.nanoforge") }
+            plugins { id("io.github.nanoforged.sectordevgradle.nanoforge") }
 
             version = "1.0"
 
@@ -40,7 +40,7 @@ class NanoForgeFunctionalTest {
                 maven { url = uri("repo") }
             }
 
-            sdg {
+            starsector {
                 modId.set("testmod")
                 modName.set("Test Mod")
                 author.set("Tester")

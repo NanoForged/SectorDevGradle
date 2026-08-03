@@ -3,6 +3,10 @@
 > 版本：v1 · 2026-08-02
 > 依据：NanoForge（feat/coremod-skeleton，R1–R4 已落地）、SourceSector（mapping 工作流）、
 > Asteria_Directorate / SSOptimizer 两个直接消费者的构建现状调查。
+> 命名（B1 改名，2026-08-03）：**SDG = SectorDevGradle 内部缩写**（模块名、包名与类名沿用）；
+> 对外 DSL 名为 `starsector`（`starsector { ... }`），插件 id 为
+> `io.github.nanoforged.sectordevgradle.mod` / `io.github.nanoforged.sectordevgradle.nanoforge`，
+> Gradle 属性统一 `starsector.*` 前缀。
 
 ## 1. 生态位与现状事实
 
@@ -110,7 +114,7 @@ SDG 提供两种游戏依赖来源，按配置择优：
   `mesa_glthread=false` 环境变量。JVM 参数基线注意按 OS/JDK 覆写（launch-spec 基线面向
   linux + Java 25，含 `--enable-preview`、`-Dcom.fs.starfarer.settings.linux=true`）。
   Asteria 的 JVM 探测与参数过滤逻辑（JBR/zulu/系统 JDK、按 JDK 版本剔除不兼容参数）直接迁移。
-- **IDEA Debug Attach**：`runGame` 支持 `-Psdg.debug=true` 注入 JDWP `agentlib:jdwp`（suspend 可配），
+- **IDEA Debug Attach**：`runGame` 支持 `-Pstarsector.debug=true` 注入 JDWP `agentlib:jdwp`（suspend 可配），
   并生成 `.run/*.run.xml`（genIntellijRuns 等价物），一键 remote attach。
 - **IDEA Sources**：named jar 的 `-sources` 分类器经 Gradle 依赖自动附加（零成本）；
   另提供 `decompileDependencies`（Vineflower，SHA-256 增量，Asteria 的 `DecompileSourcesTask` 迁移）
@@ -175,7 +179,7 @@ SDG 提供两种游戏依赖来源，按配置择优：
 - 但**机制需求是真实的**：Asteria 已经自建了两个 DataGen 等价物
   （`generateRingTextureToContents` 构建期生成贴图；`:ss-csv` classgraph 扫描 Kotlin object
   生成 CSV）。这证明"代码 → 构建期 → 数据文件 → 并入 mod 产物"的链路是内容向模组的刚需。
-- SDG 的第一阶段只需提供：注册式数据源（`sdg.dataGen` DSL 挂 JavaExec/Worker 任务）+
+- SDG 的第一阶段只需提供：注册式数据源（`starsector.dataGen` DSL 挂 JavaExec/Worker 任务）+
   输出目录自动并入 `processResources` / mod 产物布局 + 增量缓存约定。
   生成器本身永远由模组自定义。
 
@@ -184,13 +188,13 @@ SDG 提供两种游戏依赖来源，按配置择优：
 SDG 为单仓库 Gradle 插件工程，按能力分层（插件 id 暂定）：
 
 ```
-sdg (plugin: io.github.nanoforged.sdg.mod)
+sdg (plugin: io.github.nanoforged.sectordevgradle.mod)
 ├─ 工作区：游戏依赖解析（SourceSector 仓 / gameDir 扫描）、第三方 mod 依赖桥
 ├─ 产物：jar / reobfJar（named→obf）/ mod 目录布局 / zip / mod_info.json 生成
 ├─ 部署与运行：deployMod / runGame（launch-spec）/ debug 注入 / IDEA run 配置生成
 └─ 源码体验：sources 附加 / decompileDependencies（Vineflower）
 
-sdg-nanoforge (plugin: io.github.nanoforged.sdg.nanoforge)
+sdg-nanoforge (plugin: io.github.nanoforged.sectordevgradle.nanoforge)
 ├─ nanoforge.mod.toml 生成（含 [libraries] 依赖库元数据）
 ├─ coremod.toml 生成与校验、coremods 落位
 └─ patch 工作流：binpatch 生成（依赖 SourceSector patch tool 构件）、[patch] entries 装配
@@ -202,7 +206,7 @@ sdg-nanoforge (plugin: io.github.nanoforged.sdg.nanoforge)
 NanoForge   ──发布──> launch-spec（纯 Java 构件）
 SourceSector──发布──> named-game-repo + 全量 tiny 表 + patch-tool 构件
 SDG         ──消费──> 上述构件与产物
-Asteria（sdg.mod, obf 产物）/ SSOptimizer（sdg.mod + sdg.nanoforge）──应用──> SDG
+Asteria（sectordevgradle.mod, obf 产物）/ SSOptimizer（sectordevgradle.mod + sectordevgradle.nanoforge）──应用──> SDG
 ```
 
 ## 5. 待与 NanoForge / SourceSector 对齐的协同项

@@ -27,7 +27,7 @@ tasks.test {
 gradlePlugin {
     plugins {
         create("sdgMod") {
-            id = "io.github.nanoforged.sdg.mod"
+            id = "io.github.nanoforged.sectordevgradle.mod"
             implementationClass = "io.github.nanoforged.sdg.SdgModPlugin"
             displayName = "SectorDevGradle Mod"
             description = "StarSector 模组构建工具链：deobf 工作区、双形态产物（deobf/obf）、部署与运行"

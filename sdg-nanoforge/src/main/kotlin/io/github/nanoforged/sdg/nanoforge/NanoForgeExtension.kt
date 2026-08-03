@@ -20,7 +20,7 @@ abstract class NanoForgeExtension @Inject constructor(objects: ObjectFactory) {
     /** coremod.toml `pluginClass`（`INanoCorePlugin` 实现类全限定名）。coremod 形态必填。 */
     val pluginClass: Property<String> = objects.property(String::class.java)
 
-    /** coremod.toml `authors`；未设置且 sdg.author 已配置时回落为单元素列表。 */
+    /** coremod.toml `authors`；未设置且 starsector.author 已配置时回落为单元素列表。 */
     val authors: ListProperty<String> = objects.listProperty(String::class.java)
 
     /** coremod.toml `priority`（升序先加载）；未设置则不输出该键（运行时默认 0）。 */

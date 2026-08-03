@@ -63,7 +63,7 @@ abstract class GenerateNanoforgeModToml : DefaultTask() {
     @get:Input
     abstract val jarFileNames: ListProperty<String>
 
-    /** `[libraries]` 坐标解析出的 jar 文件（sdgNanoLibraries configuration），用于计算 sha256。 */
+    /** `[libraries]` 坐标解析出的 jar 文件（starsectorNanoLibraries configuration），用于计算 sha256。 */
     @get:InputFiles
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val libraryJars: ConfigurableFileCollection
@@ -115,7 +115,7 @@ abstract class GenerateNanoforgeModToml : DefaultTask() {
         val jar = libraryJars.files.singleOrNull { it.name == lib.jarFileName }
             ?: throw GradleException(
                 "无法为 [libraries] 坐标 ${lib.notation} 定位解析产物 ${lib.jarFileName}" +
-                    "（sdgNanoLibraries 实际产物：${libraryJars.files.map { it.name }.sorted()}）"
+                    "（starsectorNanoLibraries 实际产物：${libraryJars.files.map { it.name }.sorted()}）"
             )
         val digest = MessageDigest.getInstance("SHA-256")
         jar.inputStream().use { input ->

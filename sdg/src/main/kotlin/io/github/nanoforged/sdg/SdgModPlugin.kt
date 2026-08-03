@@ -30,7 +30,7 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * SDG 核心插件（`io.github.nanoforged.sdg.mod`）。
+ * SDG（SectorDevGradle 内部缩写）核心插件（`io.github.nanoforged.sectordevgradle.mod`）。
  *
  * 职责（按实现计划分轮接入）：
  * - R1：工作区与游戏依赖解析（SourceSector named 仓 / gameDir 扫描、第三方 mod 依赖桥）
@@ -43,7 +43,7 @@ class SdgModPlugin : Plugin<Project> {
     override fun apply(project: Project) {
         project.plugins.apply(JavaPlugin::class.java)
 
-        val ext = project.extensions.create("sdg", SdgExtension::class.java)
+        val ext = project.extensions.create("starsector", SdgExtension::class.java)
         ext.modVersion.convention(project.provider { project.version.toString() })
         ext.modName.convention(ext.modId)
         ext.deployDirName.convention(ext.modId)
@@ -157,12 +157,12 @@ class SdgModPlugin : Plugin<Project> {
 
     /** R3：OBF 形态产物链——reobfJar（named→obf）→ shadeObfJar（合并第三方库）→ verifyObfJar（质量门）。 */
     private fun wireObfArtifacts(project: Project, ext: SdgExtension) {
-        val mappingTool = project.configurations.create("sdgMappingTool") {
+        val mappingTool = project.configurations.create("starsectorMappingTool") {
             it.isCanBeConsumed = false
             it.isCanBeResolved = true
             it.isVisible = false
         }
-        val mappings = project.configurations.create("sdgMappings") {
+        val mappings = project.configurations.create("starsectorMappings") {
             it.isCanBeConsumed = false
             it.isCanBeResolved = true
             it.isVisible = false
@@ -242,7 +242,7 @@ class SdgModPlugin : Plugin<Project> {
         // 与项目 java toolchain 无关；JavaExec 的 javaLauncher/toolchain 机制只会引入一致性校验冲突。
         project.tasks.register("runGame", Exec::class.java) {
             it.group = TASK_GROUP
-            it.description = "启动游戏（launchMode 决定 NanoForge 前置检查链 / 原版直启；-Psdg.debug=true 注入 JDWP）"
+            it.description = "启动游戏（launchMode 决定 NanoForge 前置检查链 / 原版直启；-Pstarsector.debug=true 注入 JDWP）"
             it.dependsOn("deployMod")
             it.doFirst { exec -> configureLaunch(project, ext, exec as Exec) }
         }
@@ -254,18 +254,18 @@ class SdgModPlugin : Plugin<Project> {
             it.doLast {
                 val runDir = project.layout.projectDirectory.dir(".run").asFile
                 runDir.mkdirs()
-                runDir.resolve("SDG-runGame.run.xml").writeText(gradleRunXml())
-                runDir.resolve("SDG-Attach.run.xml").writeText(remoteAttachXml(ext.debugPort.get()))
+                runDir.resolve("Starsector-runGame.run.xml").writeText(gradleRunXml())
+                runDir.resolve("Starsector-Attach.run.xml").writeText(remoteAttachXml(ext.debugPort.get()))
             }
             project.logger.info("SDG: 已生成 .run/ 配置")
         }
 
-        val decompiler = project.configurations.create("sdgDecompiler") {
+        val decompiler = project.configurations.create("starsectorDecompiler") {
             it.isCanBeResolved = true
             it.isCanBeConsumed = false
             it.isVisible = false
         }
-        val resolvableCompileOnly = project.configurations.create("sdgResolvableCompileOnly") {
+        val resolvableCompileOnly = project.configurations.create("starsectorResolvableCompileOnly") {
             it.isCanBeResolved = true
             it.isCanBeConsumed = false
             it.isVisible = false
@@ -287,9 +287,9 @@ class SdgModPlugin : Plugin<Project> {
     /** runGame 执行时装配：双模式分支 + JVM 探测 + debug 注入。 */
     private fun configureLaunch(project: Project, ext: SdgExtension, task: Exec) {
         val gameDir = ext.gameDir.orNull?.asFile
-            ?: throw GradleException("sdg.gameDir 未设置，无法启动游戏。")
+            ?: throw GradleException("starsector.gameDir 未设置，无法启动游戏。")
         if (!gameDir.isDirectory) {
-            throw GradleException("sdg.gameDir 不存在：${gameDir.absolutePath}")
+            throw GradleException("starsector.gameDir 不存在：${gameDir.absolutePath}")
         }
         task.workingDir = gameDir
 
@@ -384,16 +384,16 @@ class SdgModPlugin : Plugin<Project> {
             listOf("-cp", classpathArg, "com.fs.starfarer.StarfarerLauncher")
     }
 
-    /** `-Psdg.debug=true` 注入 JDWP；`-Psdg.debugSuspend=false` 不挂起等待 attach。 */
+    /** `-Pstarsector.debug=true` 注入 JDWP；`-Pstarsector.debugSuspend=false` 不挂起等待 attach。 */
     private fun debugArgs(project: Project, ext: SdgExtension): List<String> {
-        if (project.providers.gradleProperty("sdg.debug").orNull != "true") return emptyList()
-        val suspend = if (project.providers.gradleProperty("sdg.debugSuspend").orNull == "false") "n" else "y"
+        if (project.providers.gradleProperty("starsector.debug").orNull != "true") return emptyList()
+        val suspend = if (project.providers.gradleProperty("starsector.debugSuspend").orNull == "false") "n" else "y"
         return listOf("-agentlib:jdwp=transport=dt_socket,server=y,suspend=$suspend,address=*:${ext.debugPort.get()}")
     }
 
     private fun gradleRunXml(): String = """
         <component name="ProjectRunConfigurationManager">
-          <configuration name="SDG runGame" type="GradleRunConfiguration" factoryName="Gradle">
+          <configuration name="Starsector runGame" type="GradleRunConfiguration" factoryName="Gradle">
             <ExternalSystemSettings>
               <option name="executionName" />
               <option name="externalProjectPath" value="${'$'}PROJECT_DIR${'$'}" />
@@ -414,7 +414,7 @@ class SdgModPlugin : Plugin<Project> {
 
     private fun remoteAttachXml(port: Int): String = """
         <component name="ProjectRunConfigurationManager">
-          <configuration name="SDG Attach" type="Remote">
+          <configuration name="Starsector Attach" type="Remote">
             <option name="USE_SOCKET_TRANSPORT" value="true" />
             <option name="SERVER_MODE" value="false" />
             <option name="SHMEM_ADDRESS" value="javadebug" />
@@ -429,9 +429,9 @@ class SdgModPlugin : Plugin<Project> {
     private fun wireDeployment(project: Project, ext: SdgExtension) {
         fun resolveDeployTarget(): File {
             val gameDir = ext.gameDir.orNull?.asFile
-                ?: throw GradleException("sdg.gameDir 未设置，无法部署。")
+                ?: throw GradleException("starsector.gameDir 未设置，无法部署。")
             if (!gameDir.isDirectory) {
-                throw GradleException("sdg.gameDir 不存在：${gameDir.absolutePath}")
+                throw GradleException("starsector.gameDir 不存在：${gameDir.absolutePath}")
             }
             return gameDir.resolve("mods/${ext.deployDirName.get()}")
         }
@@ -473,7 +473,7 @@ class SdgModPlugin : Plugin<Project> {
     /** 按 DSL 配置装配游戏依赖与第三方 mod 依赖桥。 */
     private fun wireGameDependencies(project: Project, ext: SdgExtension) {
         val modId = ext.modId.orNull
-            ?: throw GradleException("sdg.modId 未设置，它是模组元数据的唯一事实源。")
+            ?: throw GradleException("starsector.modId 未设置，它是模组元数据的唯一事实源。")
 
         when (ext.gameDependencyMode.get()) {
             GameDependencyMode.NAMED_REPO -> wireNamedRepoDeps(project, ext)
@@ -482,16 +482,16 @@ class SdgModPlugin : Plugin<Project> {
 
         wireModDependencyBridge(project, ext, modId)
         wireMappingsDependency(project, ext)
-        project.dependencies.add("sdgDecompiler", "org.vineflower:vineflower:${ext.decompilerVersion.get()}")
+        project.dependencies.add("starsectorDecompiler", "org.vineflower:vineflower:${ext.decompilerVersion.get()}")
     }
 
     /** OBF 形态且未直指定表时，从 sourceRepo 解析 mappings 表构件（`@tiny`）。 */
     private fun wireMappingsDependency(project: Project, ext: SdgExtension) {
         if (ext.artifactMode.get() != ArtifactMode.OBF || ext.mappingFile.isPresent) return
         val gameVersion = ext.gameVersion.orNull
-            ?: throw GradleException("OBF 形态需要 sdg.gameVersion 以解析 mappings 表构件（或用 sdg.mappingFile 直指定）。")
+            ?: throw GradleException("OBF 形态需要 starsector.gameVersion 以解析 mappings 表构件（或用 starsector.mappingFile 直指定）。")
         project.dependencies.add(
-            "sdgMappings",
+            "starsectorMappings",
             "$NAMED_GAME_GROUP:mappings-${ext.mappingPlatform.get()}:$gameVersion-SNAPSHOT@tiny"
         )
     }
@@ -499,12 +499,12 @@ class SdgModPlugin : Plugin<Project> {
     /** named 仓模式：SourceSector 本地 maven 仓 + 4 个 named 坐标（SNAPSHOT 每次重解析）。 */
     private fun wireNamedRepoDeps(project: Project, ext: SdgExtension) {
         val gameVersion = ext.gameVersion.orNull
-            ?: throw GradleException("sdg.gameVersion 未设置（NAMED_REPO 模式必填，如 0.98a-RC8）。")
+            ?: throw GradleException("starsector.gameVersion 未设置（NAMED_REPO 模式必填，如 0.98a-RC8）。")
         val repoDir = ext.sourceRepo.get().asFile
         if (!repoDir.isDirectory) {
             throw GradleException(
                 "SourceSector named 仓不存在：${repoDir.absolutePath}。" +
-                    "请先运行 SourceSector 的 publishNamedGameJars，或通过 sdg.sourceRepo 指定正确路径。"
+                    "请先运行 SourceSector 的 publishNamedGameJars，或通过 starsector.sourceRepo 指定正确路径。"
             )
         }
 
@@ -531,7 +531,7 @@ class SdgModPlugin : Plugin<Project> {
     private fun wireModDependencyBridge(project: Project, ext: SdgExtension, modId: String) {
         val gameDirFile = ext.gameDir.orNull?.asFile
         if (gameDirFile == null) {
-            project.logger.info("SDG: sdg.gameDir 未设置，跳过第三方 mod 依赖桥。")
+            project.logger.info("SDG: starsector.gameDir 未设置，跳过第三方 mod 依赖桥。")
             return
         }
         val modsDir = gameDirFile.resolve("mods")
@@ -548,14 +548,14 @@ class SdgModPlugin : Plugin<Project> {
 
     private fun requireGameDir(ext: SdgExtension): File {
         val gameDir = ext.gameDir.orNull?.asFile
-            ?: throw GradleException("sdg.gameDir 未设置（GAME_DIR 模式必填）。")
+            ?: throw GradleException("starsector.gameDir 未设置（GAME_DIR 模式必填）。")
         if (!gameDir.isDirectory) {
-            throw GradleException("sdg.gameDir 不存在：${gameDir.absolutePath}")
+            throw GradleException("starsector.gameDir 不存在：${gameDir.absolutePath}")
         }
         return gameDir
     }
 
     private companion object {
-        const val TASK_GROUP = "sdg"
+        const val TASK_GROUP = "starsector"
     }
 }

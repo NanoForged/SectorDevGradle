@@ -1,7 +1,8 @@
 # nanoforge.mod.toml v1 契约
 
 > 状态：草案 v1 · 2026-08-02
-> 定位：NanoForge 环境下模组的**权威元数据**；本文件是 SDG（生成端）与 NanoForge（读取端，
+> 定位：NanoForge 环境下模组的**权威元数据**；本文件是 SDG（SectorDevGradle 内部缩写，对外 DSL
+> 名为 `starsector`、插件 id 为 `io.github.nanoforged.sectordevgradle.*`）生成端与 NanoForge（读取端，
 > 待 N1 实现）的跨项目契约。初版完整覆盖 `mod_info.json` 全部字段，并新增 `[libraries]`
 > 依赖库元数据；后续版本发展为模组元数据超集（见 architecture.md 2.5）。
 

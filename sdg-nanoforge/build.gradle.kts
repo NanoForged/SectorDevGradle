@@ -25,7 +25,7 @@ tasks.test {
 gradlePlugin {
     plugins {
         create("sdgNanoForge") {
-            id = "io.github.nanoforged.sdg.nanoforge"
+            id = "io.github.nanoforged.sectordevgradle.nanoforge"
             implementationClass = "io.github.nanoforged.sdg.nanoforge.SdgNanoForgePlugin"
             displayName = "SectorDevGradle NanoForge"
             description = "NanoForge 环境支持：nanoforge.mod.toml、依赖库元数据、coremod 装配、patch 工作流"

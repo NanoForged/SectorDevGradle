@@ -19,7 +19,7 @@ import java.security.MessageDigest
 @DisableCachingByDefault(because = "增量由 SHA-256 缓存自管理，输出供 IDE 索引")
 abstract class DecompileDependencies : DefaultTask() {
 
-    /** Vineflower 可执行 jar（sdgDecompiler 配置解析结果）。 */
+    /** Vineflower 可执行 jar（starsectorDecompiler 配置解析结果）。 */
     @get:Classpath
     abstract val decompiler: ConfigurableFileCollection
 

@@ -20,7 +20,7 @@ class SdgModPluginFunctionalTest {
         projectDir.resolve("settings.gradle.kts").writeText("""rootProject.name = "testmod"""")
         projectDir.resolve("build.gradle.kts").writeText(
             """
-            plugins { id("io.github.nanoforged.sdg.mod") }
+            plugins { id("io.github.nanoforged.sectordevgradle.mod") }
 
             $script
 
@@ -93,7 +93,7 @@ class SdgModPluginFunctionalTest {
         SdgExtension.NAMED_GAME_ARTIFACTS.forEach { writeFakeNamedArtifact(repo, it, "0.98a-RC8-SNAPSHOT") }
         writeBuild(
             """
-            sdg {
+            starsector {
                 modId.set("testmod")
                 gameVersion.set("0.98a-RC8")
                 sourceRepo.set(layout.projectDirectory.dir("repo"))
@@ -115,7 +115,7 @@ class SdgModPluginFunctionalTest {
         writeEmptyJar(gameDir.resolve("starfarer-core/starfarer_obf.jar"))
         writeBuild(
             """
-            sdg {
+            starsector {
                 modId.set("testmod")
                 gameDependencyMode.set(io.github.nanoforged.sdg.GameDependencyMode.GAME_DIR)
                 gameDir.set(layout.projectDirectory.dir("game"))
@@ -151,7 +151,7 @@ class SdgModPluginFunctionalTest {
         writeEmptyJar(selfMod.resolve("jars/Self.jar"))
         writeBuild(
             """
-            sdg {
+            starsector {
                 modId.set("testmod")
                 gameDependencyMode.set(io.github.nanoforged.sdg.GameDependencyMode.GAME_DIR)
                 gameDir.set(layout.projectDirectory.dir("game"))
