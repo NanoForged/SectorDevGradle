@@ -96,6 +96,26 @@ class ReobfFunctionalTest {
         )
     }
 
+    /** 构造 `starsector.game` 组（游戏自带第三方库透传 jar）最小仓条目，wireGameLibraries 硬门禁需要。 */
+    private fun writeFakeGameLibrary(repo: File, artifact: String, version: String) {
+        val dir = repo.resolve("starsector/game/$artifact/$version")
+        dir.mkdirs()
+        ZipOutputStream(dir.resolve("$artifact-$version.jar").outputStream()).close()
+        dir.resolve("$artifact-$version.pom").writeText(
+            """<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
+                |<groupId>starsector.game</groupId><artifactId>$artifact</artifactId>
+                |<version>$version</version><packaging>jar</packaging></project>""".trimMargin()
+        )
+        dir.resolve("maven-metadata.xml").writeText(
+            """<metadata><groupId>starsector.game</groupId><artifactId>$artifact</artifactId>
+                |<version>$version</version><versioning>
+                |<snapshot><localCopy>true</localCopy></snapshot><lastUpdated>20260802000000</lastUpdated>
+                |<snapshotVersions><snapshotVersion><extension>jar</extension><value>$version</value>
+                |<updated>20260802000000</updated></snapshotVersion></snapshotVersions>
+                |<versions><version>$version</version></versions></versioning></metadata>""".trimMargin()
+        )
+    }
+
     @Test
     fun `OBF 形态：reobf 重映射 + shade 合并 + 质量门通过`() {
         val version = "0.98a-RC8-SNAPSHOT"
@@ -104,6 +124,7 @@ class ReobfFunctionalTest {
             writeFakeNamedArtifact(repo, it, version, withNamedClass = it == "starfarer_obf")
         }
         writeMappingsArtifact(repo, version)
+        writeFakeGameLibrary(repo, "xstream-1.4.21_miko", version)
 
         // 模组源码：引用 named 游戏类
         val modSrc = projectDir.resolve("src/main/java/com/example/Mod.java")

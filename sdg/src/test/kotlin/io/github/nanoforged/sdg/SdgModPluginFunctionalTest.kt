@@ -87,10 +87,51 @@ class SdgModPluginFunctionalTest {
         )
     }
 
+    /** 构造 `starsector.game` 组（游戏自带第三方库透传 jar）的最小可解析 SNAPSHOT 仓条目。 */
+    private fun writeFakeGameLibrary(repo: File, artifact: String, version: String) {
+        val dir = repo.resolve("starsector/game/$artifact/$version")
+        writeEmptyJar(dir.resolve("$artifact-$version.jar"))
+        dir.resolve("$artifact-$version.pom").writeText(
+            """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <project xmlns="http://maven.apache.org/POM/4.0.0">
+              <modelVersion>4.0.0</modelVersion>
+              <groupId>starsector.game</groupId>
+              <artifactId>$artifact</artifactId>
+              <version>$version</version>
+              <packaging>jar</packaging>
+            </project>
+            """.trimIndent()
+        )
+        dir.resolve("maven-metadata.xml").writeText(
+            """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <metadata>
+              <groupId>starsector.game</groupId>
+              <artifactId>$artifact</artifactId>
+              <version>$version</version>
+              <versioning>
+                <snapshot><localCopy>true</localCopy></snapshot>
+                <lastUpdated>20260802000000</lastUpdated>
+                <snapshotVersions>
+                  <snapshotVersion>
+                    <extension>jar</extension>
+                    <value>$version</value>
+                    <updated>20260802000000</updated>
+                  </snapshotVersion>
+                </snapshotVersions>
+                <versions><version>$version</version></versions>
+              </versioning>
+            </metadata>
+            """.trimIndent()
+        )
+    }
+
     @Test
     fun `NAMED_REPO 模式：SourceSector 仓四个 named 坐标进入 compileClasspath`() {
         val repo = projectDir.resolve("repo")
         SdgExtension.NAMED_GAME_ARTIFACTS.forEach { writeFakeNamedArtifact(repo, it, "0.98a-RC8-SNAPSHOT") }
+        writeFakeGameLibrary(repo, "xstream-1.4.21_miko", "0.98a-RC8-SNAPSHOT")
         writeBuild(
             """
             starsector {
@@ -163,5 +204,59 @@ class SdgModPluginFunctionalTest {
 
         assertTrue(output.contains("LazyLib.jar"), "第三方 mod jar 未进入 compileClasspath：\n$output")
         assertTrue(!output.contains("Self.jar"), "自身已部署 jar 不应进入 compileClasspath：\n$output")
+    }
+
+    @Test
+    fun `NAMED_REPO 模式：starsector_game 组第三方库全部进入 compileClasspath`() {
+        val repo = projectDir.resolve("repo")
+        SdgExtension.NAMED_GAME_ARTIFACTS.forEach { writeFakeNamedArtifact(repo, it, "0.98a-RC8-SNAPSHOT") }
+        writeFakeGameLibrary(repo, "xstream-1.4.21_miko", "0.98a-RC8-SNAPSHOT")
+        writeFakeGameLibrary(repo, "janino-3.1.11", "0.98a-RC8-SNAPSHOT")
+        writeBuild(
+            """
+            starsector {
+                modId.set("testmod")
+                gameVersion.set("0.98a-RC8")
+                sourceRepo.set(layout.projectDirectory.dir("repo"))
+            }
+            """.trimIndent()
+        )
+
+        val output = runBuild()
+
+        assertTrue(
+            output.contains("xstream-1.4.21_miko-0.98a-RC8-SNAPSHOT.jar"),
+            "缺少 starsector.game 第三方库：\n$output",
+        )
+        assertTrue(
+            output.contains("janino-3.1.11-0.98a-RC8-SNAPSHOT.jar"),
+            "缺少 starsector.game 第三方库：\n$output",
+        )
+    }
+
+    @Test
+    fun `NAMED_REPO 模式：starsector_game 组缺失时硬失败并提示先发布`() {
+        val repo = projectDir.resolve("repo")
+        SdgExtension.NAMED_GAME_ARTIFACTS.forEach { writeFakeNamedArtifact(repo, it, "0.98a-RC8-SNAPSHOT") }
+        writeBuild(
+            """
+            starsector {
+                modId.set("testmod")
+                gameVersion.set("0.98a-RC8")
+                sourceRepo.set(layout.projectDirectory.dir("repo"))
+            }
+            """.trimIndent()
+        )
+
+        val result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withPluginClasspath()
+            .withArguments("printCp", "--console=plain")
+            .buildAndFail()
+
+        assertTrue(
+            result.output.contains("starsector/game 组不存在或为空"),
+            "应提示先运行 SourceSector 发布：\n${result.output}",
+        )
     }
 }
