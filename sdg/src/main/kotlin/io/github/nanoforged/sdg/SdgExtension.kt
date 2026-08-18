@@ -57,6 +57,14 @@ abstract class SdgExtension @Inject constructor(objects: ObjectFactory) {
     val manageEnabledMods: Property<Boolean> =
         objects.property(Boolean::class.java).convention(false)
 
+    /**
+     * 部署时保留的子路径名列表（相对 mods/<deployDirName>/），默认空。
+     * cleanDeploy 与 Sync 均跳过这些路径——用于保留运行时生成的缓存目录
+     * （如 SSOptimizer 的 cache/ 字体包与纹理转换缓存），避免每次部署后全量重建。
+     */
+    val deployPreserve: ListProperty<String> =
+        objects.listProperty(String::class.java).convention(emptyList())
+
     /** SourceSector named 仓目录，默认 `<根工程上级>/SourceSector/build/named-game-repo/windows`。 */
     val sourceRepo: DirectoryProperty = objects.directoryProperty()
 

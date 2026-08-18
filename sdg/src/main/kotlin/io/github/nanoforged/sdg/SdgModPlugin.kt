@@ -439,12 +439,19 @@ class SdgModPlugin : Plugin<Project> {
         // 尽力删除：Windows/NTFS 占用导致的删除失败只告警，硬失败留给覆盖写入
         project.tasks.register("cleanDeploy") {
             it.group = TASK_GROUP
-            it.description = "清理游戏目录中的旧部署（尽力删除，失败仅告警）"
+            it.description = "清理游戏目录中的旧部署（尽力删除，失败仅告警；deployPreserve 路径保留）"
             it.doLast {
                 val target = resolveDeployTarget()
                 if (target.exists()) {
+                    val preserved = ext.deployPreserve.get().toSet()
                     try {
-                        target.deleteRecursively()
+                        if (preserved.isEmpty()) {
+                            target.deleteRecursively()
+                        } else {
+                            target.listFiles()?.forEach { child ->
+                                if (child.name !in preserved) child.deleteRecursively()
+                            }
+                        }
                     } catch (e: Exception) {
                         project.logger.warn("SDG: 无法删除旧部署目录（将继续覆盖式部署）：${target.absolutePath}：${e.message}")
                     }
@@ -457,6 +464,14 @@ class SdgModPlugin : Plugin<Project> {
             it.description = "部署 mod 到游戏目录 mods/<deployDirName>/"
             it.from(project.layout.buildDirectory.dir("mod_production"))
             it.into(project.provider { resolveDeployTarget() })
+            // deployPreserve 路径不参与同步删除（缓存等运行时产物保留）；
+            // 目录自身与其子树都要列入模式（"cache" 只匹配目录本身，不匹配 cache/ 下的文件）
+            it.preserve { p ->
+                ext.deployPreserve.get().forEach { entry ->
+                    p.include(entry)
+                    p.include("$entry/**")
+                }
+            }
             it.dependsOn("modProduction", "cleanDeploy")
             it.doLast {
                 project.logger.lifecycle("SDG: 已部署到 ${resolveDeployTarget().absolutePath}")

@@ -159,4 +159,28 @@ class ModProductionFunctionalTest {
             as Map<String, Any?>
         assertEquals(listOf("testmod"), enabled["enabledMods"])
     }
+
+    @Test
+    fun `deployMod 保留 deployPreserve 声明的运行时目录`() {
+        prepareProject()
+        projectDir.resolve("build.gradle.kts").apply {
+            writeText(
+                readText() + """
+                |
+                |starsector { deployPreserve.set(listOf("cache")) }
+                """.trimMargin()
+            )
+        }
+        // 预置上一轮部署产出的缓存目录（含嵌套文件），验证二次部署不清理
+        val cached = projectDir.resolve("game/mods/testmod/cache/nested/blob.bin")
+        cached.parentFile.mkdirs()
+        cached.writeText("cached")
+
+        runBuild("deployMod")
+        runBuild("deployMod")
+
+        val deployed = projectDir.resolve("game/mods/testmod")
+        assertTrue(deployed.resolve("cache/nested/blob.bin").isFile, "deployPreserve 目录被清理")
+        assertTrue(deployed.resolve("mod_info.json").isFile, "mod_info.json 未部署")
+    }
 }
