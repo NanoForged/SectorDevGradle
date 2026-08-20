@@ -32,5 +32,11 @@ gradlePlugin {
             displayName = "SectorDevGradle Mod"
             description = "StarSector 模组构建工具链：deobf 工作区、双形态产物（deobf/obf）、部署与运行"
         }
+        create("sdgGameDeps") {
+            id = "io.github.nanoforged.sectordevgradle.gamedeps"
+            implementationClass = "io.github.nanoforged.sdg.SdgGameDepsPlugin"
+            displayName = "SectorDevGradle Game Dependencies"
+            description = "StarSector 游戏依赖装配：named 仓 4 jar + gameLibraries，可独立 apply 于非 mod 工程"
+        }
     }
 }

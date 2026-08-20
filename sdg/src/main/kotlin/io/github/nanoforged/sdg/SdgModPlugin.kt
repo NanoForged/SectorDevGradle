@@ -6,12 +6,10 @@ import io.github.nanoforged.launchspec.impl.GameInstallProbeImpl
 import io.github.nanoforged.launchspec.impl.JvmArgsTemplateImpl
 import io.github.nanoforged.launchspec.impl.LaunchPrecheckImpl
 import io.github.nanoforged.launchspec.impl.SampleNamedJarProbe
-import io.github.nanoforged.sdg.SdgExtension.Companion.NAMED_GAME_ARTIFACTS
 import io.github.nanoforged.sdg.SdgExtension.Companion.NAMED_GAME_GROUP
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
-import org.gradle.api.file.Directory
 import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.plugins.BasePlugin
 import org.gradle.api.plugins.JavaPlugin
@@ -27,7 +25,6 @@ import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
 import org.gradle.plugins.ide.idea.model.IdeaModel
 import java.io.File
-import java.util.concurrent.TimeUnit
 
 /**
  * SDG（SectorDevGradle 内部缩写）核心插件（`io.github.nanoforged.sectordevgradle.mod`）。
@@ -48,9 +45,16 @@ class SdgModPlugin : Plugin<Project> {
         ext.modName.convention(ext.modId)
         ext.deployDirName.convention(ext.modId)
         ext.contentsDir.convention(project.layout.projectDirectory.dir("contents"))
-        ext.sourceRepo.convention(
-            project.rootProject.layout.projectDirectory.dir("../SourceSector/build/named-game-repo/windows")
-        )
+        ext.sourceRepo.convention(SdgGameDepsPlugin.namedRepoConvention(project))
+
+        // 游戏依赖装配（named 仓 4 jar + gameLibraries）委托给 gamedeps 轻量插件；
+        // starsector{} DSL 值在此桥接进 starsectorDeps，桥接用 convention 惰性求值——
+        // 用户 DSL 配置先于轻量插件自身的 afterEvaluate 装配完成，终值在装配时点解析。
+        project.plugins.apply(SdgGameDepsPlugin::class.java)
+        val depsExt = project.extensions.getByType(SdgGameDepsExtension::class.java)
+        depsExt.sourceRepo.convention(ext.sourceRepo)
+        depsExt.gameVersion.convention(ext.gameVersion)
+        depsExt.enabled.convention(ext.gameDependencyMode.map { it == GameDependencyMode.NAMED_REPO })
 
         ext.launchMode.convention(
             ext.artifactMode.map { if (it == ArtifactMode.OBF) LaunchMode.VANILLA else LaunchMode.NANOFORGE }
@@ -485,17 +489,17 @@ class SdgModPlugin : Plugin<Project> {
         }
     }
 
-    /** 按 DSL 配置装配游戏依赖与第三方 mod 依赖桥。 */
+    /** 按 DSL 配置装配游戏依赖与第三方 mod 依赖桥（named 仓/gameLibraries 已委托 gamedeps 插件）。 */
     private fun wireGameDependencies(project: Project, ext: SdgExtension) {
         val modId = ext.modId.orNull
             ?: throw GradleException("starsector.modId 未设置，它是模组元数据的唯一事实源。")
 
-        when (ext.gameDependencyMode.get()) {
-            GameDependencyMode.NAMED_REPO -> wireNamedRepoDeps(project, ext)
-            GameDependencyMode.GAME_DIR -> wireGameDirDeps(project, ext)
+        // named 仓模式由 gamedeps 插件装配（enabled 桥接为 gameDependencyMode==NAMED_REPO）；
+        // GAME_DIR 模式 gamedeps 被禁用，这里补游戏目录 fileTree 装配。
+        if (ext.gameDependencyMode.get() == GameDependencyMode.GAME_DIR) {
+            wireGameDirDeps(project, ext)
         }
 
-        wireGameLibraries(project, ext)
         wireModDependencyBridge(project, ext, modId)
         wireMappingsDependency(project, ext)
         project.dependencies.add("starsectorDecompiler", "org.vineflower:vineflower:${ext.decompilerVersion.get()}")
@@ -512,27 +516,6 @@ class SdgModPlugin : Plugin<Project> {
         )
     }
 
-    /** named 仓模式：SourceSector 本地 maven 仓 + 4 个 named 坐标（SNAPSHOT 每次重解析）。 */
-    private fun wireNamedRepoDeps(project: Project, ext: SdgExtension) {
-        val gameVersion = ext.gameVersion.orNull
-            ?: throw GradleException("starsector.gameVersion 未设置（NAMED_REPO 模式必填，如 0.98a-RC8）。")
-        val repoDir = ext.sourceRepo.get().asFile
-        if (!repoDir.isDirectory) {
-            throw GradleException(
-                "SourceSector named 仓不存在：${repoDir.absolutePath}。" +
-                    "请先运行 SourceSector 的 publishNamedGameJars，或通过 starsector.sourceRepo 指定正确路径。"
-            )
-        }
-
-        project.repositories.maven { it.url = repoDir.toURI() }
-        project.configurations.configureEach {
-            it.resolutionStrategy.cacheChangingModulesFor(0, TimeUnit.SECONDS)
-        }
-        NAMED_GAME_ARTIFACTS.forEach { artifact ->
-            project.dependencies.add("compileOnly", "$NAMED_GAME_GROUP:$artifact:$gameVersion-SNAPSHOT")
-        }
-    }
-
     /** gameDir 模式：游戏根目录与 starfarer-core 的 jar 全量 compileOnly。 */
     private fun wireGameDirDeps(project: Project, ext: SdgExtension) {
         val gameDir = requireGameDir(ext)
@@ -541,42 +524,6 @@ class SdgModPlugin : Plugin<Project> {
             "compileOnly",
             project.fileTree(gameDir.resolve("starfarer-core")) { it.include("*.jar") }
         )
-    }
-
-    /**
-     * 游戏自带第三方库自动供给（B2b）：
-     * - NAMED_REPO 模式：扫描 SourceSector 仓 `starsector/game/` 组下全部 artifact 目录（透传 jar，
-     *   artifact = 文件名去 .jar，version 与 named jar 相同），逐个生成 `starsector.game:<artifact>`
-     *   坐标挂进 gameLibraries；目录不存在或为空直接报错，提示先跑 SourceSector 发布。
-     * - GAME_DIR 模式：wireGameDirDeps 已把 gameDir 根目录与 starfarer-core 下的全部 jar
-     *   （`*.jar` fileTree）挂进 compileOnly，第三方库与 4 个游戏主 jar 同源供给，
-     *   游戏自带库已随 compileClasspath 进入，无需重复挂载。
-     */
-    private fun wireGameLibraries(project: Project, ext: SdgExtension) {
-        if (ext.gameDependencyMode.get() != GameDependencyMode.NAMED_REPO) return
-
-        val gameVersion = ext.gameVersion.orNull
-            ?: throw GradleException("starsector.gameVersion 未设置（NAMED_REPO 模式必填，如 0.98a-RC8）。")
-        val gameLibsDir = ext.sourceRepo.get().asFile.resolve("starsector/game")
-        val artifactDirs = gameLibsDir.listFiles()?.filter { it.isDirectory }.orEmpty()
-        if (!gameLibsDir.isDirectory || artifactDirs.isEmpty()) {
-            throw GradleException(
-                "SourceSector 仓的 starsector/game 组不存在或为空：${gameLibsDir.absolutePath}。" +
-                    "请先运行 SourceSector 的游戏第三方库透传发布任务。"
-            )
-        }
-
-        val gameLibraries = project.configurations.create("gameLibraries") {
-            it.isCanBeResolved = true
-            it.isCanBeConsumed = false
-            it.isVisible = false
-        }
-        project.configurations.getByName(JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME).extendsFrom(gameLibraries)
-        project.configurations.getByName(JavaPlugin.TEST_COMPILE_ONLY_CONFIGURATION_NAME).extendsFrom(gameLibraries)
-        // changing module 缓存策略由 wireNamedRepoDeps 的 configureEach 统一覆盖（gameLibraries 后建亦生效）
-        artifactDirs.forEach { artifactDir ->
-            project.dependencies.add(gameLibraries.name, "starsector.game:${artifactDir.name}:$gameVersion-SNAPSHOT")
-        }
     }
 
     /** 第三方 mod 依赖桥：扫描 gameDir/mods 下各模组 mod_info.json 的 jars 字段。 */

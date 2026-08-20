@@ -188,11 +188,14 @@ SDG 提供两种游戏依赖来源，按配置择优：
 SDG 为单仓库 Gradle 插件工程，按能力分层（插件 id 暂定）：
 
 ```
-sdg (plugin: io.github.nanoforged.sectordevgradle.mod)
-├─ 工作区：游戏依赖解析（SourceSector 仓 / gameDir 扫描）、第三方 mod 依赖桥
-├─ 产物：jar / reobfJar（named→obf）/ mod 目录布局 / zip / mod_info.json 生成
-├─ 部署与运行：deployMod / runGame（launch-spec）/ debug 注入 / IDEA run 配置生成
-└─ 源码体验：sources 附加 / decompileDependencies（Vineflower）
+sdg
+├─ gamedeps（plugin: io.github.nanoforged.sectordevgradle.gamedeps，可独立 apply 于非 mod 工程）
+│  └─ 游戏依赖装配：named 仓（starsector.named 4 jar compileOnly）+ gameLibraries 创建/扫描/挂载
+├─ mod（plugin: io.github.nanoforged.sectordevgradle.mod，组合 gamedeps）
+│  ├─ 工作区：游戏依赖解析（SourceSector 仓 / gameDir 扫描）、第三方 mod 依赖桥
+│  ├─ 产物：jar / reobfJar（named→obf）/ mod 目录布局 / zip / mod_info.json 生成
+│  ├─ 部署与运行：deployMod / runGame（launch-spec）/ debug 注入 / IDEA run 配置生成
+│  └─ 源码体验：sources 附加 / decompileDependencies（Vineflower）
 
 sdg-nanoforge (plugin: io.github.nanoforged.sectordevgradle.nanoforge)
 ├─ nanoforge.mod.toml 生成（含 [libraries] 依赖库元数据）
@@ -206,7 +209,8 @@ sdg-nanoforge (plugin: io.github.nanoforged.sectordevgradle.nanoforge)
 NanoForge   ──发布──> launch-spec（纯 Java 构件）
 SourceSector──发布──> named-game-repo + 全量 tiny 表 + patch-tool 构件
 SDG         ──消费──> 上述构件与产物
-Asteria（sectordevgradle.mod, obf 产物）/ SSOptimizer（sectordevgradle.mod + sectordevgradle.nanoforge）──应用──> SDG
+Asteria（sectordevgradle.mod, obf 产物）──应用──> SDG
+SSOptimizer（sectordevgradle.mod + sectordevgradle.nanoforge；功能模块 apply sectordevgradle.gamedeps）──应用──> SDG
 ```
 
 ## 5. 待与 NanoForge / SourceSector 对齐的协同项

@@ -102,8 +102,8 @@ abstract class SdgExtension @Inject constructor(objects: ObjectFactory) {
     val decompiledSourcesDir: DirectoryProperty = objects.directoryProperty()
 
     companion object {
-        /** SourceSector 发布的 4 个 named 游戏 jar 坐标。 */
-        const val NAMED_GAME_GROUP = "starsector.named"
-        val NAMED_GAME_ARTIFACTS = listOf("starfarer_obf", "starfarer.api", "fs.common_obf", "fs.sound_obf")
+        /** SourceSector 发布的 4 个 named 游戏 jar 坐标（事实源在 [SdgGameDepsPlugin]，此处保持既有访问路径）。 */
+        const val NAMED_GAME_GROUP = SdgGameDepsPlugin.NAMED_GAME_GROUP
+        val NAMED_GAME_ARTIFACTS: List<String> get() = SdgGameDepsPlugin.NAMED_GAME_ARTIFACTS
     }
 }
