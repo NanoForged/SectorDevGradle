@@ -12,7 +12,7 @@ import java.util.zip.ZipOutputStream
 import javax.tools.ToolProvider
 
 /**
- * R3 功能测试：OBF 形态全链路——真实调用 SourceSector mapping 工具（mavenLocal）执行 reobf，
+ * R3 功能测试：OBF 形态全链路——真实调用 NanoForge remap 工具（mavenLocal）执行 reobf，
  * shade 合并第三方库，verifyObfJar 质量门通过。
  */
 class ReobfFunctionalTest {

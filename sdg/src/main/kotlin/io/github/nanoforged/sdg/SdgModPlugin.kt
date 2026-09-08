@@ -10,6 +10,7 @@ import io.github.nanoforged.sdg.SdgExtension.Companion.NAMED_GAME_GROUP
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.plugins.BasePlugin
 import org.gradle.api.plugins.JavaPlugin
@@ -170,7 +171,16 @@ class SdgModPlugin : Plugin<Project> {
             it.isCanBeResolved = true
             it.isVisible = false
         }
-        project.dependencies.add(mappingTool.name, "io.github.nanoforged:sourcesector-mapping:0.1.0-SNAPSHOT")
+        // 工具 classpath 只需 remap CLI 本体 + ASM + 日志门面；
+        // NanoForge 的 coremod 运行时依赖（RFB/Mixin/lwjgl 等）不属于工具链，故关闭传递并显式列出。
+        val nanoForge = project.dependencies.create("io.github.nanoforged:NanoForge:0.1.0-SNAPSHOT")
+            as ExternalModuleDependency
+        nanoForge.isTransitive = false
+        project.dependencies.add(mappingTool.name, nanoForge)
+        project.dependencies.add(mappingTool.name, "org.ow2.asm:asm-commons:9.9")
+        project.dependencies.add(mappingTool.name, "org.slf4j:slf4j-api:2.0.17")
+        project.dependencies.add(mappingTool.name, "org.apache.logging.log4j:log4j-core:2.25.2")
+        project.dependencies.add(mappingTool.name, "org.apache.logging.log4j:log4j-slf4j2-impl:2.25.2")
 
         // mapping 表来源：DSL 直指定优先，否则从 sourceRepo 解析 mappings 构件（dep 在 afterEvaluate 补充）
         val mappingFile: Provider<File> = project.provider {
@@ -185,13 +195,12 @@ class SdgModPlugin : Plugin<Project> {
         val toolchains = project.extensions.getByType(JavaToolchainService::class.java)
         val reobfJar = project.tasks.register("reobfJar", JavaExec::class.java) {
             it.group = TASK_GROUP
-            it.description = "将主 jar 从 named 重映射为 obf 字节码（SourceSector mapping 工具）"
+            it.description = "将主 jar 从 named 重映射为 obf 字节码（NanoForge remap 工具）"
             it.onlyIf { ext.artifactMode.get() == ArtifactMode.OBF }
             it.classpath = mappingTool
-            it.mainClass.set("io.github.nanoforged.sourcesector.mapping.JarRemapCli")
-            // mapping 工具以 release 25 编译
+            it.mainClass.set("io.github.nanoforged.core.remap.JarRemapCli")
             it.javaLauncher.set(
-                toolchains.launcherFor { spec -> spec.languageVersion.set(JavaLanguageVersion.of(25)) }
+                toolchains.launcherFor { spec -> spec.languageVersion.set(JavaLanguageVersion.of(17)) }
             )
             it.inputs.file(mainJar.flatMap { t -> t.archiveFile })
             it.inputs.file(mappingFile)
