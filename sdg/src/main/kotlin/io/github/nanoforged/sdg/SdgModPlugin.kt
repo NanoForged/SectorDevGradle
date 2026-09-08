@@ -306,9 +306,24 @@ class SdgModPlugin : Plugin<Project> {
             System.getenv("STARSECTOR_JAVA_HOME"),
             System.getenv("JBR17_HOME"),
         ).map { File(it) }
-        val runtime = JavaRuntimeResolverImpl().resolve(gameDir, configuredJava, configuredJavaHomes)
+        val requiredVersion = listOfNotNull(
+            project.findProperty("starsector.javaVersion")?.toString(),
+            System.getenv("STARSECTOR_JAVA_VERSION"),
+        ).firstOrNull()?.let {
+            it.toIntOrNull()
+                ?: throw GradleException("starsector.javaVersion 必须是整数（Java 主版本号，如 25）：$it")
+        }
+        val requiredVendor = listOfNotNull(
+            project.findProperty("starsector.javaVendor")?.toString(),
+            System.getenv("STARSECTOR_JAVA_VENDOR"),
+        ).firstOrNull()
+        val runtime = JavaRuntimeResolverImpl().resolve(
+            gameDir, configuredJava, configuredJavaHomes, requiredVersion, requiredVendor,
+        )
         task.executable = runtime.executable.absolutePath
-        project.logger.lifecycle("SDG: runGame 使用 Java：${runtime.executable}（${runtime.versionLine}）")
+        project.logger.lifecycle(
+            "SDG: runGame 使用 Java：${runtime.executable}（${runtime.versionLine}，vendor=${runtime.vendor}）"
+        )
 
         val debugArgs = debugArgs(project, ext)
         when (ext.launchMode.get()) {

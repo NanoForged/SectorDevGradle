@@ -64,13 +64,14 @@ class JavaRuntimeResolverImplTest {
         assertNotNull(runtime)
         assertNotNull(runtime!!.majorVersion)
         assertTrue(runtime.versionLine.isNotBlank())
+        assertNotNull(runtime.vendor)
     }
 
     @Test
     fun `不兼容参数过滤：JDK 版本与 JBR 判定`() {
-        val jdk17 = JavaRuntime(File("/x/java"), 17, "openjdk 17", false)
-        val jdk25 = JavaRuntime(File("/x/java"), 25, "openjdk 25", false)
-        val jbr17 = JavaRuntime(File("/x/java"), 17, "openjdk 17 jbr", true)
+        val jdk17 = JavaRuntime(File("/x/java"), 17, "openjdk 17", false, "openjdk")
+        val jdk25 = JavaRuntime(File("/x/java"), 25, "openjdk 25", false, "zulu")
+        val jbr17 = JavaRuntime(File("/x/java"), 17, "openjdk 17 jbr", true, "jetbrains")
         val args = listOf("-Xms4g", "-XX:+UseCompactObjectHeaders", "-XX:+AllowEnhancedClassRedefinition")
 
         val (kept17, removed17) = JavaRuntimeResolverImpl.filterIncompatibleArgs(args, jdk17)
@@ -82,5 +83,92 @@ class JavaRuntimeResolverImplTest {
 
         val (keptJbr, _) = JavaRuntimeResolverImpl.filterIncompatibleArgs(args, jbr17)
         assertEquals(listOf("-Xms4g", "-XX:+AllowEnhancedClassRedefinition"), keptJbr)
+    }
+
+    @TempDir
+    lateinit var fakeJdkDir: File
+
+    /** 假 java：-version 输出给定版本与 vendor 行（与 RunFunctionalTest 的 fake-jre 同款模式）。 */
+    private fun fakeJava(name: String, versionLine: String, vendorLine: String): File {
+        val java = fakeJdkDir.resolve("$name/bin/java")
+        java.parentFile.mkdirs()
+        java.writeText(
+            """
+            #!/bin/sh
+            if [ "${'$'}1" = "-version" ]; then
+                echo '$versionLine'
+                echo '$vendorLine'
+                exit 0
+            fi
+            echo "FAKE-$name"
+            """.trimIndent()
+        )
+        java.setExecutable(true)
+        return java
+    }
+
+    @Test
+    fun `probe 解析主版本号与 vendor`() {
+        val zulu25 = fakeJava(
+            "zulu25",
+            """openjdk version "25.0.2" 2026-01-20 LTS""",
+            "OpenJDK Runtime Environment Zulu25.48+15-CA (build 25.0.2+9-LTS)",
+        )
+
+        val runtime = JavaRuntimeResolverImpl.probe(zulu25)
+
+        assertNotNull(runtime)
+        assertEquals(25, runtime!!.majorVersion)
+        assertEquals("zulu", runtime.vendor)
+        assertEquals(false, runtime.isJetBrainsRuntime)
+    }
+
+    @Test
+    fun `resolve 按主版本号过滤候选`() {
+        val jdk17 = fakeJava("jdk17", """openjdk version "17.0.12" 2024-07-16""", "OpenJDK Runtime Environment Temurin-17.0.12+7")
+        val jdk25 = fakeJava("jdk25", """openjdk version "25.0.2" 2026-01-20 LTS""", "OpenJDK Runtime Environment Zulu25.48+15-CA")
+
+        val runtime = JavaRuntimeResolverImpl().resolve(
+            gameDir = fakeJdkDir,
+            configuredJava = listOf(jdk17, jdk25),
+            configuredJavaHomes = emptyList(),
+            requiredVersion = 25,
+        )
+
+        assertEquals(jdk25, runtime.executable)
+    }
+
+    @Test
+    fun `resolve 按 vendor 过滤且 jbr 别名映射 jetbrains`() {
+        val zulu = fakeJava("zulu25", """openjdk version "25.0.2" 2026-01-20 LTS""", "OpenJDK Runtime Environment Zulu25.48+15-CA")
+        val jbr = fakeJava("jbr25", """openjdk version "25.0.2" 2026-01-20 LTS""", "OpenJDK Runtime Environment JBR-25.0.2+9 (build 25.0.2+9)")
+
+        val runtime = JavaRuntimeResolverImpl().resolve(
+            gameDir = fakeJdkDir,
+            configuredJava = listOf(zulu, jbr),
+            configuredJavaHomes = emptyList(),
+            requiredVersion = 25,
+            requiredVendor = "jbr",
+        )
+
+        assertEquals(jbr, runtime.executable)
+        assertEquals("jetbrains", runtime.vendor)
+    }
+
+    @Test
+    fun `过滤后无候选时报错并列出探测结果`() {
+        val jdk17 = fakeJava("jdk17", """openjdk version "17.0.12" 2024-07-16""", "OpenJDK Runtime Environment Temurin-17.0.12+7")
+
+        val ex = org.junit.jupiter.api.assertThrows<IllegalStateException> {
+            JavaRuntimeResolverImpl().resolve(
+                gameDir = fakeJdkDir,
+                configuredJava = listOf(jdk17),
+                configuredJavaHomes = emptyList(),
+                requiredVersion = 99,
+            )
+        }
+
+        assertTrue(ex.message!!.contains("要求主版本 99"))
+        assertTrue(ex.message!!.contains("jdk17"))
     }
 }
