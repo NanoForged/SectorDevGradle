@@ -192,4 +192,119 @@ class JavaRuntimeResolverImplTest {
         assertTrue(ex.message!!.contains("要求主版本 99"))
         assertTrue(ex.message!!.contains("jdk17"))
     }
+
+    @TempDir
+    lateinit var tierDir: File
+
+    private val bundledDirName = when (JavaRuntimeResolverImpl.osKey()) {
+        "windows" -> "zulu25_win"
+        "mac" -> "zulu25_mac"
+        else -> "zulu25_linux"
+    }
+
+    /** 造自带 zulu25 游戏目录与隔离 userHome（`.jdks` 下可放假 JBR）。 */
+    private fun tierFixture(jbrName: String?, jbrVersionLine: String, jbrVendorLine: String): Pair<File, File> {
+        val gameDir = tierDir.resolve("game")
+        val zulu = gameDir.resolve("$bundledDirName/bin/java")
+        zulu.parentFile.mkdirs()
+        zulu.writeText(
+            """
+            #!/bin/sh
+            echo 'openjdk version "25.0.2" 2026-01-20 LTS'
+            echo 'OpenJDK Runtime Environment Zulu25.48+15-CA (build 25.0.2+9-LTS)'
+            """.trimIndent()
+        )
+        zulu.setExecutable(true)
+
+        val home = tierDir.resolve("home")
+        if (jbrName != null) {
+            val jbr = home.resolve(".jdks/$jbrName/bin/java")
+            jbr.parentFile.mkdirs()
+            jbr.writeText(
+                """
+                #!/bin/sh
+                echo '$jbrVersionLine'
+                echo '$jbrVendorLine'
+                """.trimIndent()
+            )
+            jbr.setExecutable(true)
+        }
+        return gameDir to home
+    }
+
+    @Test
+    fun `JBR25 默认优先于游戏自带 zulu25`() {
+        val (gameDir, home) = tierFixture(
+            "jbr-25.0.2", """openjdk version "25.0.2" 2026-01-20""",
+            "OpenJDK Runtime Environment JBR-25.0.2+9 (build 25.0.2+9)",
+        )
+
+        val runtime = JavaRuntimeResolverImpl(userHome = home).resolve(
+            gameDir = gameDir,
+            configuredJava = emptyList(),
+            configuredJavaHomes = emptyList(),
+            requiredVersion = 25,
+        )
+
+        assertEquals("jetbrains", runtime.vendor)
+        assertTrue(runtime.executable.path.contains("jbr-25.0.2"), "应选中 ~/.jdks 的 JBR25: ${runtime.executable}")
+    }
+
+    @Test
+    fun `JBR17 被保护栏拦截 不抢自带 zulu25（无版本约束亦不选旧 JBR）`() {
+        val (gameDir, home) = tierFixture(
+            "jbr-17.0.14", """openjdk version "17.0.14" 2025-01-21""",
+            "OpenJDK Runtime Environment JBR-17.0.14+7 (build 17.0.14+7)",
+        )
+
+        val runtime = JavaRuntimeResolverImpl(userHome = home).resolve(
+            gameDir = gameDir,
+            configuredJava = emptyList(),
+            configuredJavaHomes = emptyList(),
+            requiredVersion = null,
+        )
+
+        assertEquals("zulu", runtime.vendor)
+        assertTrue(runtime.executable.path.contains(bundledDirName), "应选中自带 zulu25: ${runtime.executable}")
+    }
+
+    @Test
+    fun `显式 vendor=zulu 时自带运行时优先于 JBR25`() {
+        val (gameDir, home) = tierFixture(
+            "jbr-25.0.2", """openjdk version "25.0.2" 2026-01-20""",
+            "OpenJDK Runtime Environment JBR-25.0.2+9 (build 25.0.2+9)",
+        )
+
+        val runtime = JavaRuntimeResolverImpl(userHome = home).resolve(
+            gameDir = gameDir,
+            configuredJava = emptyList(),
+            configuredJavaHomes = emptyList(),
+            requiredVersion = 25,
+            requiredVendor = "zulu",
+        )
+
+        assertEquals("zulu", runtime.vendor)
+        assertTrue(runtime.executable.path.contains(bundledDirName), "显式 zulu 应选中自带运行时: ${runtime.executable}")
+    }
+
+    @Test
+    fun `显式配置的 java 优先于 JBR 层`() {
+        val (gameDir, home) = tierFixture(
+            "jbr-25.0.2", """openjdk version "25.0.2" 2026-01-20""",
+            "OpenJDK Runtime Environment JBR-25.0.2+9 (build 25.0.2+9)",
+        )
+        val configured = fakeJava(
+            "configured25", """openjdk version "25.0.2" 2026-01-20 LTS""",
+            "OpenJDK Runtime Environment Temurin-25.0.2+9",
+        )
+
+        val runtime = JavaRuntimeResolverImpl(userHome = home).resolve(
+            gameDir = gameDir,
+            configuredJava = listOf(configured),
+            configuredJavaHomes = emptyList(),
+            requiredVersion = 25,
+        )
+
+        assertEquals(configured, runtime.executable)
+    }
 }

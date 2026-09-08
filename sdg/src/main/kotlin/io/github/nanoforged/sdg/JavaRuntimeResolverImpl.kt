@@ -6,11 +6,19 @@ import java.util.concurrent.TimeUnit
 /**
  * [JavaRuntimeResolver] 默认实现（候选清单与参数过滤迁移自 Asteria `launchGame`）。
  *
- * 候选顺序：显式配置 → 游戏目录自带（zulu25 优先于旧 jre）→ `~/.jdks` 下的 JBR → 当前 JVM 兜底。
- * 游戏自带运行时优先于 JBR：模组生态已要求 Java 25，JBR 17 无法加载新字节码；
- * 需要 JBR 热重定义时显式指定 `-Pstarsector.javaVendor=jetbrains`（搭配 `~/.jdks` 下的新版 JBR）。
+ * 候选分层：显式配置 → JBR（`~/.jdks` 下的 jbr-* 与当前 JVM 为 JBR 时的自身）
+ * → 游戏目录自带（zulu25 优先于旧 jre）→ 当前 JVM 兜底。
+ * JBR 默认优先于游戏自带运行时：JBR 支持增强类重定义
+ * （`-XX:+AllowEnhancedClassRedefinition`，热重载方法体替换），开发期收益大。
+ * 保护栏：版本低于游戏自带运行时的 JBR（如 JBR 17 vs 自带 zulu25）不参与竞争，
+ * 避免无版本约束时误选无法加载新字节码的旧 JBR；显式 `-Pstarsector.javaVendor=`
+ * 指定 vendor 时保护栏不生效（用户明确意图优先）。
+ *
+ * @property userHome 用户主目录（`~/.jdks` 扫描根）；测试可注入临时目录隔离真实环境
  */
-class JavaRuntimeResolverImpl : JavaRuntimeResolver {
+class JavaRuntimeResolverImpl(
+    private val userHome: File = File(System.getProperty("user.home")),
+) : JavaRuntimeResolver {
 
     override fun resolve(
         gameDir: File,
@@ -20,7 +28,6 @@ class JavaRuntimeResolverImpl : JavaRuntimeResolver {
         requiredVendor: String?,
     ): JavaRuntime {
         val javaExt = if (osKey() == "windows") ".exe" else ""
-        val userHome = File(System.getProperty("user.home"))
 
         val jbrCandidates = File(userHome, ".jdks").listFiles()
             ?.filter { it.isDirectory && it.name.contains("jbr-") }
@@ -35,26 +42,45 @@ class JavaRuntimeResolverImpl : JavaRuntimeResolver {
         }.map { File(it, "bin/java$javaExt") }
 
         val fallback = File(System.getProperty("java.home"), "bin/java$javaExt")
+        val probedFallback = probe(fallback)
+        // 当前 JVM 本身是 JBR 时（如 IDEA 以 JBR 跑 Gradle 守护进程）并入 JBR 层
+        val jbrTier = if (probedFallback?.isJetBrainsRuntime == true) {
+            jbrCandidates + fallback
+        } else {
+            jbrCandidates
+        }
 
-        val candidates = configuredJava +
-            configuredJavaHomes.map { File(it, "bin/java$javaExt") } +
-            bundledCandidates + jbrCandidates + listOf(fallback)
+        val configured = configuredJava + configuredJavaHomes.map { File(it, "bin/java$javaExt") }
+        val probedConfigured = configured.mapNotNull(::probe)
+        val probedJbr = jbrTier.mapNotNull(::probe)
+        val probedBundled = bundledCandidates.mapNotNull(::probe)
 
-        val probed = candidates.mapNotNull(::probe)
         val vendorAliases = requiredVendor?.let { vendorAliasesOf(it) }
-        val matched = probed.filter { runtime ->
+        // JBR 保护栏：未显式指定 vendor 时，版本低于游戏自带运行时的 JBR 不参与竞争
+        // （无版本约束的项目不会被 JBR 17 抢走而选择无法加载新字节码的运行时）；
+        // 显式 vendor=jetbrains 是用户明确意图，不受此限
+        val bestBundledVersion = probedBundled.mapNotNull { it.majorVersion }.maxOrNull()
+        val jbrGuarded = if (vendorAliases == null && bestBundledVersion != null) {
+            probedJbr.filter { (it.majorVersion ?: 0) >= bestBundledVersion }
+        } else {
+            probedJbr
+        }
+        val ordered = probedConfigured + jbrGuarded + probedBundled + listOfNotNull(probedFallback)
+        val matched = ordered.filter { runtime ->
             (requiredVersion == null || runtime.majorVersion == requiredVersion) &&
                 (vendorAliases == null || runtime.vendor in vendorAliases)
         }
         return matched.firstOrNull()
             ?: throw IllegalStateException(
                 buildString {
+                    val candidates = configured + jbrTier + bundledCandidates + fallback
+                    val allProbed = probedConfigured + probedJbr + probedBundled + listOfNotNull(probedFallback)
                     append("未找到满足条件的 Java 运行时")
                     if (requiredVersion != null) append("（要求主版本 $requiredVersion）")
                     if (requiredVendor != null) append("（要求 vendor $requiredVendor）")
                     append("。已探测 ${candidates.size} 个候选：")
-                    probed.forEach { append("\n  ${it.executable} → ${it.versionLine}") }
-                    val unprobed = candidates - probed.map { it.executable }.toSet()
+                    allProbed.forEach { append("\n  ${it.executable} → ${it.versionLine}") }
+                    val unprobed = candidates - allProbed.map { it.executable }.toSet()
                     unprobed.forEach { append("\n  $it → 不可执行") }
                 }
             )
