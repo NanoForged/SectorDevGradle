@@ -15,7 +15,6 @@ import org.gradle.api.plugins.BasePlugin
 import org.gradle.api.plugins.JavaPlugin
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Delete
-import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.JavaExec
 import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.bundling.Zip
@@ -242,13 +241,16 @@ class SdgModPlugin : Plugin<Project> {
 
     /** R4：runGame（双启动模式）、genIdeaRuns（IDEA 配置生成）、decompileDependencies（源码阅读）。 */
     private fun wireRun(project: Project, ext: SdgExtension) {
-        // 用 Exec 而非 JavaExec：runGame 的 JVM 由 JavaRuntimeResolver 按候选清单探测（游戏自带/指定 JBR），
-        // 与项目 java toolchain 无关；JavaExec 的 javaLauncher/toolchain 机制只会引入一致性校验冲突。
-        project.tasks.register("runGame", Exec::class.java) {
+        // JavaExec：IDEA 以调试运行 Gradle 任务时能直接注入游戏 fork JVM，断点/热替换免 Remote Attach。
+        // Gradle 9 的 JavaExec 无条件以 javaLauncher 为 fork JVM 来源，executable 仅参与一致性校验，
+        // 因此把探测到的运行时以 ResolvedJavaLauncher 注入 javaLauncher（e6e212a 曾因 toolchain
+        // convention 与 executable 冲突整体退回 Exec，代价正是丢失 IDEA fork JVM 调试）。
+        // 全部装配在配置期完成：JavaExec 的属性在执行动作（doFirst）前即 final，执行期改写会报错。
+        project.tasks.register("runGame", JavaExec::class.java) {
             it.group = TASK_GROUP
-            it.description = "启动游戏（launchMode 决定 NanoForge 前置检查链 / 原版直启；-Pstarsector.debug=true 注入 JDWP）"
+            it.description = "启动游戏（launchMode 决定 NanoForge 前置检查链 / 原版直启；IDEA 调试运行直接生效；-Pstarsector.debug=true 注入 JDWP）"
             it.dependsOn("deployMod")
-            it.doFirst { exec -> configureLaunch(project, ext, exec as Exec) }
+            configureLaunch(project, ext, it)
         }
 
         project.tasks.register("genIdeaRuns") {
@@ -289,7 +291,7 @@ class SdgModPlugin : Plugin<Project> {
     }
 
     /** runGame 执行时装配：双模式分支 + JVM 探测 + debug 注入。 */
-    private fun configureLaunch(project: Project, ext: SdgExtension, task: Exec) {
+    private fun configureLaunch(project: Project, ext: SdgExtension, task: JavaExec) {
         val gameDir = ext.gameDir.orNull?.asFile
             ?: throw GradleException("starsector.gameDir 未设置，无法启动游戏。")
         if (!gameDir.isDirectory) {
@@ -320,14 +322,16 @@ class SdgModPlugin : Plugin<Project> {
         val runtime = JavaRuntimeResolverImpl().resolve(
             gameDir, configuredJava, configuredJavaHomes, requiredVersion, requiredVendor,
         )
-        task.executable = runtime.executable.absolutePath
+        // javaLauncher 决定 fork JVM；executable 同步设置以通过 Gradle 的一致性校验。
+        task.javaLauncher.set(ResolvedJavaLauncher.of(project.objects, runtime))
+        task.setExecutable(runtime.executable.absolutePath)
         project.logger.lifecycle(
             "SDG: runGame 使用 Java：${runtime.executable}（${runtime.versionLine}，vendor=${runtime.vendor}）"
         )
 
         val debugArgs = debugArgs(project, ext)
         when (ext.launchMode.get()) {
-            LaunchMode.NANOFORGE -> configureNanoForgeLaunch(project, ext, task, gameDir, debugArgs)
+            LaunchMode.NANOFORGE -> configureNanoForgeLaunch(project, ext, task, gameDir, runtime, debugArgs)
             LaunchMode.VANILLA -> configureVanillaLaunch(project, ext, task, gameDir, runtime, debugArgs)
         }
     }
@@ -336,8 +340,9 @@ class SdgModPlugin : Plugin<Project> {
     private fun configureNanoForgeLaunch(
         project: Project,
         ext: SdgExtension,
-        task: Exec,
+        task: JavaExec,
         gameDir: File,
+        runtime: JavaRuntime,
         debugArgs: List<String>,
     ) {
         val osKey = JavaRuntimeResolverImpl.osKey()
@@ -368,13 +373,10 @@ class SdgModPlugin : Plugin<Project> {
             )
         }
 
-        val classpathArg = report.classpath().entries()
-            .joinToString(File.pathSeparator) { entry -> entry.file().toFile().absolutePath }
-        task.args = report.jvmArgs() + debugArgs + listOf(
-            "-cp", classpathArg,
-            "com.gtnewhorizons.retrofuturabootstrap.Main",
-            "--tweakClass", "io.github.nanoforged.NanoForgeBootstrap",
-        )
+        task.classpath = project.files(report.classpath().entries().map { it.file().toFile() })
+        task.jvmArgs = JavaRuntimeResolverImpl.withEnhancedRedefinition(report.jvmArgs(), runtime) + debugArgs
+        task.mainClass.set("com.gtnewhorizons.retrofuturabootstrap.Main")
+        task.args = listOf("--tweakClass", "io.github.nanoforged.NanoForgeBootstrap")
         if (osKey == "linux") {
             task.environment("mesa_glthread", "false")
         }
@@ -384,7 +386,7 @@ class SdgModPlugin : Plugin<Project> {
     private fun configureVanillaLaunch(
         project: Project,
         ext: SdgExtension,
-        task: Exec,
+        task: JavaExec,
         gameDir: File,
         runtime: JavaRuntime,
         debugArgs: List<String>,
@@ -397,10 +399,9 @@ class SdgModPlugin : Plugin<Project> {
         if (removed.isNotEmpty()) {
             project.logger.lifecycle("SDG: 已移除与当前 JVM 不兼容的参数：${removed.joinToString(", ")}")
         }
-        val classpathArg = config.classpath
-            .joinToString(File.pathSeparator) { File(gameDir, it).absolutePath }
-        task.args = kept + config.osArgs + debugArgs +
-            listOf("-cp", classpathArg, "com.fs.starfarer.StarfarerLauncher")
+        task.classpath = project.files(config.classpath.map { File(gameDir, it) })
+        task.jvmArgs = JavaRuntimeResolverImpl.withEnhancedRedefinition(kept, runtime) + config.osArgs + debugArgs
+        task.mainClass.set("com.fs.starfarer.StarfarerLauncher")
     }
 
     /** `-Pstarsector.debug=true` 注入 JDWP；`-Pstarsector.debugSuspend=false` 不挂起等待 attach。 */

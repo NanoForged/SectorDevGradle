@@ -80,9 +80,9 @@ class RunFunctionalTest {
 
     @Test
     fun `VANILLA 模式：显式 javaExec 生效且不被项目 toolchain 冲突拦截`() {
-        // 假 java：-version 探测输出版本行，其余调用回显标记即退出。
-        // Asteria 迁移实测：项目配置 java toolchain 时 JavaExec 的 javaLauncher convention
-        // 与 executable 并存触发 Gradle toolchain 一致性校验，本用例防回归。
+        // 假 java：-version 探测输出版本行（toolchain 元数据探测同样走它），其余调用回显标记即退出。
+        // 防回归锚点：项目配置 java toolchain 时，runGame 以 javaLauncher(installationPath) 指配探测到的
+        // 运行时——若退回 executable 直设，会与 javaLauncher convention 并存触发 Gradle 一致性校验。
         val fakeJava = projectDir.resolve("fake-jre/bin/java")
         fakeJava.parentFile.mkdirs()
         fakeJava.writeText(

@@ -115,6 +115,17 @@ class JavaRuntimeResolverImpl : JavaRuntimeResolver {
         }
 
         /**
+         * 支持增强重定义的运行时（JBR）自动附加 `-XX:+AllowEnhancedClassRedefinition`（未声明时）；
+         * 其他 vendor 原样返回（该参数为 JBR 独有，[filterIncompatibleArgs] 会剥离）。
+         */
+        fun withEnhancedRedefinition(args: List<String>, runtime: JavaRuntime): List<String> =
+            if (runtime.isJetBrainsRuntime && "-XX:+AllowEnhancedClassRedefinition" !in args) {
+                args + "-XX:+AllowEnhancedClassRedefinition"
+            } else {
+                args
+            }
+
+        /**
          * 过滤与运行时不兼容的 JVM 参数（迁移自 Asteria）：
          * JDK<24 去掉 UseCompactObjectHeaders，非 JBR 去掉 AllowEnhancedClassRedefinition。
          *

@@ -85,6 +85,27 @@ class JavaRuntimeResolverImplTest {
         assertEquals(listOf("-Xms4g", "-XX:+AllowEnhancedClassRedefinition"), keptJbr)
     }
 
+    @Test
+    fun `增强重定义参数：JBR 自动附加 其他 vendor 原样`() {
+        val jbr25 = JavaRuntime(File("/x/java"), 25, "openjdk 25 jbr", true, "jetbrains")
+        val zulu25 = JavaRuntime(File("/x/java"), 25, "openjdk 25 zulu", false, "zulu")
+        val args = listOf("-Xms4g")
+
+        assertEquals(
+            listOf("-Xms4g", "-XX:+AllowEnhancedClassRedefinition"),
+            JavaRuntimeResolverImpl.withEnhancedRedefinition(args, jbr25),
+            "JBR 未声明时自动附加",
+        )
+        assertEquals(
+            args + "-XX:+AllowEnhancedClassRedefinition",
+            JavaRuntimeResolverImpl.withEnhancedRedefinition(
+                args + "-XX:+AllowEnhancedClassRedefinition", jbr25,
+            ),
+            "已声明时不重复附加",
+        )
+        assertEquals(args, JavaRuntimeResolverImpl.withEnhancedRedefinition(args, zulu25), "非 JBR 原样返回")
+    }
+
     @TempDir
     lateinit var fakeJdkDir: File
 
